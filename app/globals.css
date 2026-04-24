@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    font-feature-settings: "ss01", "cv11";
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-paper-card border border-paper-line shadow-sm;
+  }
+  .card-pad {
+    @apply p-5;
+  }
+  .section-title {
+    @apply text-xs uppercase tracking-[0.18em] text-ink-muted font-medium;
+  }
+  .metric-value {
+    @apply text-3xl font-semibold text-ink;
+  }
+}
