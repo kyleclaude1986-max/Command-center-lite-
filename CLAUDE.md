@@ -183,7 +183,18 @@ Kyle pasted three secrets in chat that all needed adjustments:
 
 1. `NEXTAUTH_SECRET` — format OK (base64), but **now in chat history**.
 2. `ENCRYPTION_KEY` — was **hex (64 chars)**, but `lib/crypto.ts` decodes as base64 and requires 32 bytes after decode. Two paths: regenerate as `openssl rand -base64 32`, OR patch `lib/crypto.ts` to accept either format.
-3. `AUTH_PASSWORD_HASH` — **truncated to 53 chars**; a valid `$2b$12$…` bcrypt hash is exactly 60 chars. Re-run `npm run hash-password -- 'pw'` and copy the full output.
+3. `AUTH_PASSWORD_HASH` — arrived as **53 chars** instead of 60.
+
+   **Root cause found 2026-08-11 (this was not a copy-paste truncation).** A bare
+   `$` in a `.env` file is read as a variable reference, so `$2b`, `$12`, and the
+   third `$` get expanded to nothing — removing exactly 7 characters from a
+   60-character hash and leaving 53. Quoting the value does not help; the
+   expansion runs after parsing. Every dollar sign must be escaped as `\$`.
+
+   Fixed in both apps: `npm run hash-password` now prints a ready-to-paste
+   `AUTH_PASSWORD_HASH=` line with the escaping already applied, and the gym app
+   refuses to boot on a malformed hash rather than failing silently at the login
+   screen. `.env.example` and `deploy/README.md` document it in both apps.
 
 **I told him to regenerate all three** because anything pasted in chat is logged. I have not received confirmation that he did.
 

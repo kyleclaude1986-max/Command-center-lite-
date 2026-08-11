@@ -39,7 +39,10 @@ Create `.env.production` (copy from `.env.example`), then:
 chmod 600 .env.production
 # Generate password hash for NextAuth:
 npm run hash-password -- 'your-password-here'
-# Paste the hash into AUTH_PASSWORD_HASH.
+# Copy the ready-to-paste AUTH_PASSWORD_HASH= line it prints, not the bare hash.
+# The dollar signs must be escaped as \$ — a bare $ in a .env file is read as a
+# variable reference, which strips the $2b$12$ prefix and leaves a 53-character
+# hash that fails every sign-in with no useful error.
 
 # Create the data directory for SQLite:
 sudo mkdir -p /var/lib/command-center/data

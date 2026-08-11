@@ -28,6 +28,17 @@ const schema = z.object({
 
 export const env = schema.parse(process.env);
 
+const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+
+if (env.AUTH_PASSWORD_HASH && !BCRYPT_HASH.test(env.AUTH_PASSWORD_HASH)) {
+  throw new Error(
+    "AUTH_PASSWORD_HASH is not a valid bcrypt hash. A bcrypt hash is 60 characters " +
+      "and starts with $2b$12$. If you pasted one into a .env file, the dollar signs " +
+      "were most likely eaten as variable references — escape each one as \\$, " +
+      "or copy the ready-to-paste line that `npm run hash-password` prints."
+  );
+}
+
 export function requireEnv<K extends keyof typeof env>(key: K): NonNullable<(typeof env)[K]> {
   const value = env[key];
   if (value === undefined || value === "") {

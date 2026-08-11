@@ -7,4 +7,11 @@ if (!password) {
   process.exit(1);
 }
 
-console.log(bcrypt.hashSync(password, 12));
+const hash = bcrypt.hashSync(password, 12);
+
+console.log(hash);
+console.log("");
+console.log("Paste this line into your .env file exactly as printed.");
+console.log("The backslashes matter: a bare $ is read as a variable and eats the hash.");
+console.log("");
+console.log(`AUTH_PASSWORD_HASH=${hash.replace(/\$/g, "\\$")}`);
