@@ -15,7 +15,8 @@
     "verify": "SQLITE_PATH=./data/verify.sqlite DISABLE_SCHEDULER=1 tsx scripts/verify.ts",
     "db:studio": "drizzle-kit studio",
     "hash-password": "tsx scripts/hash-password.ts",
-    "gen-secret": "tsx scripts/gen-secret.ts"
+    "gen-secret": "tsx scripts/gen-secret.ts",
+    "backup": "tsx scripts/backup-db.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
