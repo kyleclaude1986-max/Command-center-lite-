@@ -18,7 +18,19 @@ const { eq } = require("drizzle-orm") as typeof import("drizzle-orm");
 migrate(db, { migrationsFolder: "./drizzle" });
 runSeed();
 
-const { goals, recoveryLog, recoveryTypes, vacations, workouts, workoutTypes } = schema;
+const supplementsLib = require("../lib/supplements") as typeof import("../lib/supplements");
+
+const {
+  goals,
+  recoveryLog,
+  recoveryTypes,
+  supplementLog,
+  supplements,
+  supplementSlots,
+  vacations,
+  workouts,
+  workoutTypes,
+} = schema;
 const { addDaysIso, diffDaysIso, weekStartIso } = dates;
 
 let failures = 0;
@@ -82,7 +94,7 @@ section(`Fixed today ${TODAY}, week starts ${WEEK}, ${ELAPSED + 1} days elapsed`
 section("Goal separation");
 reset();
 logWorkout("ithinkfit-gym-fit-camp", WEEK);
-logWorkout("ithinkfit-olympus", addDaysIso(WEEK, 1));
+logWorkout("ithinkfit-olympius", addDaysIso(WEEK, 1));
 logWorkout("west-o-strength", addDaysIso(WEEK, 2));
 check("gym counts three gym workouts", summary("gym").qualifiedCount, 3);
 check("cardio unaffected by gym workouts", summary("cardio").qualifiedCount, 0);
@@ -187,11 +199,11 @@ check("three sauna days meet the recovery goal", summary("sauna-goal").met, true
 
 section("Archiving keeps history");
 reset();
-logWorkout("ithinkfit-olympus", WEEK);
+logWorkout("ithinkfit-olympius", WEEK);
 check("logged before archiving", summary("gym").qualifiedCount, 1);
 db.update(workoutTypes)
   .set({ archivedAt: Math.floor(Date.now() / 1000) })
-  .where(eq(workoutTypes.slug, "ithinkfit-olympus"))
+  .where(eq(workoutTypes.slug, "ithinkfit-olympius"))
   .run();
 check("archived type still counts its history", summary("gym").qualifiedCount, 1);
 
@@ -201,6 +213,141 @@ logWorkout("west-o-strength", WEEK);
 check("logged", summary("gym").qualifiedCount, 1);
 db.update(workouts).set({ deletedAt: Math.floor(Date.now() / 1000) }).run();
 check("soft deleted workout stops counting", summary("gym").qualifiedCount, 0);
+
+section("Supplement schedules");
+reset();
+db.delete(supplementLog).run();
+db.delete(supplements).run();
+
+const morningSlot = db
+  .select()
+  .from(supplementSlots)
+  .where(eq(supplementSlots.slug, "morning"))
+  .get()!;
+
+function addSupplement(
+  slug: string,
+  values: Partial<typeof supplements.$inferInsert> = {}
+): number {
+  return db
+    .insert(supplements)
+    .values({ slug, name: slug, slotId: morningSlot.id, ...values })
+    .returning({ id: supplements.id })
+    .get().id;
+}
+
+function dueSlugs(iso: string): string[] {
+  return supplementsLib
+    .supplementDay(iso, TODAY)
+    .due.map((s) => s.slug)
+    .sort();
+}
+
+const daily = addSupplement("daily-item");
+const monWed = addSupplement("mon-wed", {
+  scheduleKind: "weekdays",
+  scheduleDays: JSON.stringify([1, 3]),
+});
+addSupplement("workout-only", { scheduleKind: "workout_days" });
+addSupplement("every-third", {
+  scheduleKind: "interval",
+  intervalDays: 3,
+  startsOn: WEEK,
+});
+
+check("daily is due on a Monday", dueSlugs(WEEK).includes("daily-item"), true);
+check("daily is due on a Tuesday", dueSlugs(addDaysIso(WEEK, 1)).includes("daily-item"), true);
+check("weekday item due on its Monday", dueSlugs(WEEK).includes("mon-wed"), true);
+check("weekday item not due on Tuesday", dueSlugs(addDaysIso(WEEK, 1)).includes("mon-wed"), false);
+check("weekday item due again on Wednesday", dueSlugs(addDaysIso(WEEK, 2)).includes("mon-wed"), true);
+check("interval item due on its anchor", dueSlugs(WEEK).includes("every-third"), true);
+check("interval item not due one day later", dueSlugs(addDaysIso(WEEK, 1)).includes("every-third"), false);
+check("interval item due three days later", dueSlugs(addDaysIso(WEEK, 3)).includes("every-third"), true);
+
+check("workout-day item not due with no workout", dueSlugs(WEEK).includes("workout-only"), false);
+logWorkout("west-o-strength", WEEK);
+check("workout-day item due once a workout is logged", dueSlugs(WEEK).includes("workout-only"), true);
+
+section("Supplement day status and streak");
+reset();
+db.delete(supplementLog).run();
+db.delete(supplements).run();
+const a = addSupplement("item-a");
+const b = addSupplement("item-b");
+
+function take(id: number, iso: string) {
+  db.insert(supplementLog).values({ takenOn: iso, supplementId: id }).run();
+}
+
+const yesterday = addDaysIso(TODAY, -1);
+const twoBack = addDaysIso(TODAY, -2);
+
+check("a past day with nothing logged reads not_logged", supplementsLib.supplementDay(yesterday, TODAY).status, "not_logged");
+take(a, yesterday);
+check("a past day with one of two reads missed", supplementsLib.supplementDay(yesterday, TODAY).status, "missed");
+take(b, yesterday);
+check("a past day with both reads hit", supplementsLib.supplementDay(yesterday, TODAY).status, "hit");
+
+take(a, TODAY);
+check("today with one outstanding reads in_progress", supplementsLib.supplementDay(TODAY, TODAY).status, "in_progress");
+check("in-progress today does not break the streak", supplementsLib.supplementStreak(TODAY), 1);
+
+take(b, TODAY);
+check("completing today reads hit", supplementsLib.supplementDay(TODAY, TODAY).status, "hit");
+check("completing today extends the streak", supplementsLib.supplementStreak(TODAY), 2);
+
+take(a, twoBack);
+take(b, twoBack);
+check("a third consecutive day extends the streak", supplementsLib.supplementStreak(TODAY), 3);
+
+db.delete(supplementLog).where(eq(supplementLog.takenOn, yesterday)).run();
+check("a gap breaks the streak back to today only", supplementsLib.supplementStreak(TODAY), 1);
+
+section("Archiving a supplement");
+reset();
+db.delete(supplementLog).run();
+db.delete(supplements).run();
+const solo = addSupplement("solo-item");
+take(solo, yesterday);
+check("due before archiving", supplementsLib.supplementDay(yesterday, TODAY).due.length, 1);
+db.update(supplements)
+  .set({ archivedAt: Math.floor(Date.now() / 1000) })
+  .where(eq(supplements.id, solo))
+  .run();
+check("archived supplement stops being due", supplementsLib.supplementDay(yesterday, TODAY).due.length, 0);
+check(
+  "archived supplement keeps its log rows",
+  db.select().from(supplementLog).all().length,
+  1
+);
+
+section("Strength and planning flags");
+check(
+  "Olympius is spelled correctly",
+  db.select().from(workoutTypes).where(eq(workoutTypes.slug, "ithinkfit-olympius")).get()?.name,
+  "iThinkFit Olympius"
+);
+check(
+  "all three gym types are strength",
+  db
+    .select()
+    .from(workoutTypes)
+    .all()
+    .filter((t: { isStrength: boolean }) => t.isStrength)
+    .map((t: { slug: string }) => t.slug)
+    .sort(),
+  ["ithinkfit-gym-fit-camp", "ithinkfit-olympius", "west-o-strength"]
+);
+check(
+  "only West O supports planning",
+  db
+    .select()
+    .from(workoutTypes)
+    .all()
+    .filter((t: { supportsPlanning: boolean }) => t.supportsPlanning)
+    .map((t: { slug: string }) => t.slug),
+  ["west-o-strength"]
+);
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) process.exit(1);

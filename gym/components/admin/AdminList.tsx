@@ -11,7 +11,18 @@ export type AdminField =
   | { key: string; label: string; type: "text" | "number" | "date"; placeholder?: string; hint?: string }
   | { key: string; label: string; type: "select"; options: AdminFieldOption[]; hint?: string }
   | { key: string; label: string; type: "color"; hint?: string }
-  | { key: string; label: string; type: "checkbox"; hint?: string };
+  | { key: string; label: string; type: "checkbox"; hint?: string }
+  | { key: string; label: string; type: "weekdays"; hint?: string };
+
+const WEEKDAYS = [
+  { value: 1, label: "M" },
+  { value: 2, label: "T" },
+  { value: 3, label: "W" },
+  { value: 4, label: "T" },
+  { value: 5, label: "F" },
+  { value: 6, label: "S" },
+  { value: 7, label: "S" },
+];
 
 export type AdminItem = {
   id: number;
@@ -76,6 +87,46 @@ function FieldInput({
           ))}
         </select>
       </label>
+    );
+  }
+
+  if (field.type === "weekdays") {
+    const selected = String(value)
+      .split(",")
+      .map((d) => Number(d.trim()))
+      .filter((n) => Number.isInteger(n));
+    return (
+      <div>
+        <span className="field-label">{field.label}</span>
+        <div className="flex gap-1.5">
+          {WEEKDAYS.map((day, i) => {
+            const on = selected.includes(day.value);
+            return (
+              <button
+                key={i}
+                type="button"
+                aria-pressed={on}
+                aria-label={`Day ${day.value}`}
+                onClick={() => {
+                  const next = on
+                    ? selected.filter((d) => d !== day.value)
+                    : [...selected, day.value].sort();
+                  onChange(next.join(","));
+                }}
+                className={clsx(
+                  "h-10 flex-1 rounded-lg border text-sm font-medium transition-colors",
+                  on
+                    ? "border-ink bg-ink text-paper"
+                    : "border-paper-line bg-paper-card text-ink-muted"
+                )}
+              >
+                {day.label}
+              </button>
+            );
+          })}
+        </div>
+        {field.hint && <span className="mt-1 block text-xs text-ink-muted">{field.hint}</span>}
+      </div>
     );
   }
 

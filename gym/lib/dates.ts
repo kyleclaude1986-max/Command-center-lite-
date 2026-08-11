@@ -37,6 +37,10 @@ export function weekStartIso(iso: IsoDate): IsoDate {
   return addDaysIso(iso, -((day + 6) % 7));
 }
 
+export function dayOfWeekIso(iso: IsoDate): number {
+  return ((dateFromIso(iso).getUTCDay() + 6) % 7) + 1;
+}
+
 export function weekDaysIso(anyDayInWeek: IsoDate): IsoDate[] {
   const start = weekStartIso(anyDayInWeek);
   return Array.from({ length: 7 }, (_, i) => addDaysIso(start, i));

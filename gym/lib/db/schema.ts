@@ -8,6 +8,10 @@ export const MUSCLE_GROUPS = ["back", "chest", "legs", "shoulders", "abs_calves"
 export const MEALS = ["breakfast", "lunch", "dinner", "snack"] as const;
 export const PHOTO_POSES = ["front", "side", "back"] as const;
 export const CALENDAR_SYNC_STATES = ["pending", "synced", "failed", "skipped"] as const;
+export const SUPPLEMENT_SCHEDULES = ["daily", "weekdays", "workout_days", "interval"] as const;
+export const SUPPLEMENT_UNITS = ["capsule", "tablet", "scoop", "g", "mg", "mcg", "IU", "ml"] as const;
+export const PLAN_STATUSES = ["scheduled", "generated", "completed", "skipped"] as const;
+export const PLAN_SOURCES = ["claude", "fallback", "manual"] as const;
 
 export const gymSettings = sqliteTable("gym_settings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -36,6 +40,8 @@ export const workoutTypes = sqliteTable(
     name: text("name").notNull(),
     goalId: integer("goal_id").references(() => goals.id, { onDelete: "set null" }),
     hasSubtypes: integer("has_subtypes", { mode: "boolean" }).notNull().default(false),
+    isStrength: integer("is_strength", { mode: "boolean" }).notNull().default(false),
+    supportsPlanning: integer("supports_planning", { mode: "boolean" }).notNull().default(false),
     color: text("color").notNull().default("#566270"),
     position: integer("position").notNull().default(0),
     archivedAt: integer("archived_at"),
@@ -124,6 +130,7 @@ export const workouts = sqliteTable(
     rating: integer("rating"),
     notes: text("notes"),
     appleHealthUuid: text("apple_health_uuid").unique(),
+    planId: integer("plan_id"),
     sourceScheduledId: integer("source_scheduled_id"),
     calendarUid: text("calendar_uid"),
     calendarHref: text("calendar_href"),
@@ -397,6 +404,194 @@ export const syncRuns = sqliteTable(
   })
 );
 
+export const supplementSlots = sqliteTable("supplement_slots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  position: integer("position").notNull().default(0),
+  archivedAt: integer("archived_at"),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+export const supplements = sqliteTable(
+  "supplements",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    dose: real("dose"),
+    unit: text("unit").notNull().default("capsule"),
+    slotId: integer("slot_id")
+      .notNull()
+      .references(() => supplementSlots.id, { onDelete: "restrict" }),
+    scheduleKind: text("schedule_kind", { enum: SUPPLEMENT_SCHEDULES })
+      .notNull()
+      .default("daily"),
+    scheduleDays: text("schedule_days").notNull().default("[]"),
+    intervalDays: integer("interval_days"),
+    startsOn: text("starts_on"),
+    notes: text("notes"),
+    position: integer("position").notNull().default(0),
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => ({
+    bySlot: index("supplements_slot_idx").on(t.slotId),
+  })
+);
+
+export const supplementLog = sqliteTable(
+  "supplement_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    takenOn: text("taken_on").notNull(),
+    supplementId: integer("supplement_id")
+      .notNull()
+      .references(() => supplements.id, { onDelete: "restrict" }),
+    takenAt: integer("taken_at").notNull().default(now),
+  },
+  (t) => ({
+    uniqPerDay: uniqueIndex("supplement_log_day_item_idx").on(t.takenOn, t.supplementId),
+    byDate: index("supplement_log_taken_on_idx").on(t.takenOn),
+  })
+);
+
+export const planTemplates = sqliteTable("plan_templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().default("My week"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at").notNull().default(now),
+  updatedAt: integer("updated_at").notNull().default(now),
+});
+
+export const planTemplateDays = sqliteTable(
+  "plan_template_days",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => planTemplates.id, { onDelete: "cascade" }),
+    dayOfWeek: integer("day_of_week").notNull(),
+    workoutTypeId: integer("workout_type_id").references(() => workoutTypes.id, {
+      onDelete: "cascade",
+    }),
+    workoutSubtypeId: integer("workout_subtype_id").references(() => workoutSubtypes.id, {
+      onDelete: "set null",
+    }),
+    targetRepsLow: integer("target_reps_low").notNull().default(8),
+    targetRepsHigh: integer("target_reps_high").notNull().default(12),
+    restSeconds: integer("rest_seconds").notNull().default(90),
+    exerciseCount: integer("exercise_count").notNull().default(5),
+  },
+  (t) => ({
+    uniqPerDay: uniqueIndex("plan_template_days_template_dow_idx").on(t.templateId, t.dayOfWeek),
+  })
+);
+
+export const workoutPlans = sqliteTable(
+  "workout_plans",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    plannedOn: text("planned_on").notNull(),
+    workoutTypeId: integer("workout_type_id")
+      .notNull()
+      .references(() => workoutTypes.id, { onDelete: "cascade" }),
+    workoutSubtypeId: integer("workout_subtype_id").references(() => workoutSubtypes.id, {
+      onDelete: "set null",
+    }),
+    targetRepsLow: integer("target_reps_low").notNull().default(8),
+    targetRepsHigh: integer("target_reps_high").notNull().default(12),
+    restSeconds: integer("rest_seconds").notNull().default(90),
+    exerciseCount: integer("exercise_count").notNull().default(5),
+    status: text("status", { enum: PLAN_STATUSES }).notNull().default("scheduled"),
+    generatedBy: text("generated_by", { enum: PLAN_SOURCES }),
+    generatedAt: integer("generated_at"),
+    templateDayId: integer("template_day_id").references(() => planTemplateDays.id, {
+      onDelete: "set null",
+    }),
+    workoutId: integer("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+    isOverride: integer("is_override", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => ({
+    uniqPerDay: uniqueIndex("workout_plans_planned_on_idx").on(t.plannedOn),
+    byStatus: index("workout_plans_status_idx").on(t.status),
+  })
+);
+
+export const planExercises = sqliteTable(
+  "plan_exercises",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planId: integer("plan_id")
+      .notNull()
+      .references(() => workoutPlans.id, { onDelete: "cascade" }),
+    exerciseId: integer("exercise_id")
+      .notNull()
+      .references(() => exercises.id, { onDelete: "restrict" }),
+    position: integer("position").notNull().default(0),
+    note: text("note"),
+  },
+  (t) => ({
+    byPlan: index("plan_exercises_plan_idx").on(t.planId),
+  })
+);
+
+export const planSets = sqliteTable(
+  "plan_sets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planExerciseId: integer("plan_exercise_id")
+      .notNull()
+      .references(() => planExercises.id, { onDelete: "cascade" }),
+    setNumber: integer("set_number").notNull().default(1),
+    targetReps: integer("target_reps"),
+    targetWeightLb: real("target_weight_lb"),
+    isWarmup: integer("is_warmup", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    byPlanExercise: index("plan_sets_plan_exercise_idx").on(t.planExerciseId),
+  })
+);
+
+export const planGenerations = sqliteTable(
+  "plan_generations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planId: integer("plan_id")
+      .notNull()
+      .references(() => workoutPlans.id, { onDelete: "cascade" }),
+    source: text("source", { enum: PLAN_SOURCES }).notNull(),
+    model: text("model"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    prompt: text("prompt"),
+    response: text("response"),
+    error: text("error"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => ({
+    byPlan: index("plan_generations_plan_idx").on(t.planId),
+  })
+);
+
+export const dailyEnergy = sqliteTable(
+  "daily_energy",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    measuredOn: text("measured_on").notNull().unique(),
+    activeKcal: real("active_kcal"),
+    basalKcal: real("basal_kcal"),
+    source: text("source", { enum: ["manual", "apple_health"] }).notNull().default("apple_health"),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => ({
+    byDate: index("daily_energy_measured_on_idx").on(t.measuredOn),
+  })
+);
+
 export type GymSettings = typeof gymSettings.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type WorkoutType = typeof workoutTypes.$inferSelect;
@@ -419,6 +614,21 @@ export type ScheduledWorkout = typeof scheduledWorkouts.$inferSelect;
 export type HealthIngest = typeof healthIngests.$inferSelect;
 export type SyncRun = typeof syncRuns.$inferSelect;
 
+export type SupplementSlot = typeof supplementSlots.$inferSelect;
+export type Supplement = typeof supplements.$inferSelect;
+export type SupplementLogEntry = typeof supplementLog.$inferSelect;
+export type PlanTemplate = typeof planTemplates.$inferSelect;
+export type PlanTemplateDay = typeof planTemplateDays.$inferSelect;
+export type WorkoutPlan = typeof workoutPlans.$inferSelect;
+export type PlanExercise = typeof planExercises.$inferSelect;
+export type PlanSet = typeof planSets.$inferSelect;
+export type PlanGeneration = typeof planGenerations.$inferSelect;
+export type DailyEnergy = typeof dailyEnergy.$inferSelect;
+
+export type SupplementSchedule = (typeof SUPPLEMENT_SCHEDULES)[number];
+export type SupplementUnit = (typeof SUPPLEMENT_UNITS)[number];
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
+export type PlanSource = (typeof PLAN_SOURCES)[number];
 export type MacroDirection = (typeof MACRO_DIRECTIONS)[number];
 export type MuscleGroup = (typeof MUSCLE_GROUPS)[number];
 export type Meal = (typeof MEALS)[number];

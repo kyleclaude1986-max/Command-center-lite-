@@ -1,11 +1,23 @@
 import { db } from "./db/client";
-import { exercises, goals, recoveryTypes, vacations, workoutSubtypes, workoutTypes } from "./db/schema";
+import {
+  exercises,
+  goals,
+  recoveryTypes,
+  supplements,
+  supplementSlots,
+  vacations,
+  workoutSubtypes,
+  workoutTypes,
+} from "./db/schema";
 import {
   countRecoveryForType,
+  countSupplementLogs,
+  countSupplementsInSlot,
   countTypesForGoal,
   countWorkoutsForExercise,
   countWorkoutsForType,
 } from "./admin-entities";
+import { parseDays } from "./supplements";
 import type { AdminItem } from "@/components/admin/AdminList";
 import { fmtDuration, pluralize } from "./format";
 import { fmtIsoDay } from "./dates";
@@ -180,6 +192,106 @@ export function exerciseItems(): AdminItem[] {
         },
       };
     });
+}
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function scheduleLabel(supplement: typeof supplements.$inferSelect): string {
+  switch (supplement.scheduleKind) {
+    case "daily":
+      return "every day";
+    case "weekdays": {
+      const days = parseDays(supplement.scheduleDays);
+      if (days.length === 0) return "no days set";
+      if (days.length === 7) return "every day";
+      return days.map((d) => DAY_NAMES[d - 1]).join(", ");
+    }
+    case "workout_days":
+      return "workout days";
+    case "interval":
+      return supplement.intervalDays === 1
+        ? "every day"
+        : `every ${supplement.intervalDays ?? "?"} days`;
+    default:
+      return "";
+  }
+}
+
+export function supplementSlotItems(): AdminItem[] {
+  return db
+    .select()
+    .from(supplementSlots)
+    .orderBy(supplementSlots.position)
+    .all()
+    .map((slot) => {
+      const used = countSupplementsInSlot(slot.id);
+      return {
+        id: slot.id,
+        label: slot.name,
+        sublabel: `${used} ${pluralize(used, "supplement")}`,
+        archived: slot.archivedAt !== null,
+        deleteImpact:
+          used > 0
+            ? `Blocked while ${used} ${pluralize(used, "supplement")} still ${used === 1 ? "uses" : "use"} it.`
+            : "Nothing is using it.",
+        values: { name: slot.name, position: slot.position },
+      };
+    });
+}
+
+export function supplementItems(): AdminItem[] {
+  const slots = db.select().from(supplementSlots).all();
+  const slotById = new Map(slots.map((s) => [s.id, s]));
+
+  return db
+    .select()
+    .from(supplements)
+    .orderBy(supplements.position, supplements.name)
+    .all()
+    .map((supplement) => {
+      const used = countSupplementLogs(supplement.id);
+      const dose =
+        supplement.dose === null
+          ? null
+          : `${Number.isInteger(supplement.dose) ? supplement.dose : supplement.dose.toFixed(1)} ${supplement.unit}`;
+      return {
+        id: supplement.id,
+        label: supplement.name,
+        sublabel: [
+          slotById.get(supplement.slotId)?.name ?? "No slot",
+          dose,
+          scheduleLabel(supplement),
+          `${used} logged`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        archived: supplement.archivedAt !== null,
+        deleteImpact:
+          used > 0
+            ? `Blocked while ${used} logged ${pluralize(used, "day")} reference it. Archive instead.`
+            : "Nothing is using it.",
+        values: {
+          name: supplement.name,
+          slotId: supplement.slotId,
+          dose: supplement.dose,
+          unit: supplement.unit,
+          scheduleKind: supplement.scheduleKind,
+          scheduleDays: parseDays(supplement.scheduleDays).join(","),
+          intervalDays: supplement.intervalDays,
+          startsOn: supplement.startsOn,
+          position: supplement.position,
+        },
+      };
+    });
+}
+
+export function supplementSlotOptions() {
+  return db
+    .select()
+    .from(supplementSlots)
+    .orderBy(supplementSlots.position)
+    .all()
+    .map((slot) => ({ value: String(slot.id), label: slot.name }));
 }
 
 export function goalOptions(includeNone = true) {

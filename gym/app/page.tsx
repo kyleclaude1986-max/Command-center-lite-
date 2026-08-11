@@ -4,14 +4,17 @@ import { GoalCard } from "@/components/GoalCard";
 import { QuickRecovery } from "@/components/QuickRecovery";
 import { RatingButtons } from "@/components/RatingButtons";
 import { WorkoutListItem } from "@/components/WorkoutListItem";
+import { SupplementSlots, type SlotGroupView } from "@/components/SupplementSlots";
 import { fmtIsoDay, fmtIsoRelative, todayIso } from "@/lib/dates";
 import { goalSummaries } from "@/lib/goals";
+import { pluralize } from "@/lib/format";
 import {
   getActiveRecoveryTypes,
   getRecoveryOn,
   getUnratedWorkouts,
   getWorkoutsOn,
 } from "@/lib/queries";
+import { slotGroupsFor, supplementDay, supplementStreak } from "@/lib/supplements";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +25,22 @@ export default function HomePage() {
   const recoveryToday = getRecoveryOn(today);
   const recoveryOptions = getActiveRecoveryTypes();
   const unrated = getUnratedWorkouts(today);
+  const supplements = supplementDay(today);
+  const supplementGroups: SlotGroupView[] = slotGroupsFor(today).map((group) => ({
+    slotId: group.slot.id,
+    slotName: group.slot.name,
+    items: group.items.map((item) => ({
+      id: item.supplement.id,
+      name: item.supplement.name,
+      dose:
+        item.supplement.dose === null
+          ? null
+          : `${Number.isInteger(item.supplement.dose) ? item.supplement.dose : item.supplement.dose.toFixed(1)} ${item.supplement.unit}`,
+      taken: item.taken,
+    })),
+  }));
+  const supplementsTaken = supplements.due.filter((s) => supplements.takenIds.has(s.id)).length;
+  const supplementStreakDays = supplementStreak(today);
 
   return (
     <>
@@ -76,6 +95,24 @@ export default function HomePage() {
             performedOn={today}
           />
         </section>
+
+        {supplementGroups.length > 0 && (
+          <section className="card card-pad">
+            <header className="mb-3 flex items-baseline justify-between">
+              <h2 className="section-title">Supplements</h2>
+              <span className="text-xs text-ink-muted">
+                {supplementsTaken} / {supplements.due.length}
+                {supplementStreakDays > 0 && (
+                  <>
+                    {" "}
+                    · {supplementStreakDays} {pluralize(supplementStreakDays, "day")}
+                  </>
+                )}
+              </span>
+            </header>
+            <SupplementSlots groups={supplementGroups} takenOn={today} />
+          </section>
+        )}
 
         {unrated.length > 0 && (
           <section className="card card-pad">

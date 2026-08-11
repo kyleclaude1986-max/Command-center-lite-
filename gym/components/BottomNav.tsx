@@ -7,6 +7,7 @@ import clsx from "clsx";
 const TABS = [
   { href: "/", label: "Today" },
   { href: "/workouts", label: "Workouts" },
+  { href: "/supplements", label: "Stack" },
   { href: "/food", label: "Food" },
   { href: "/body", label: "Body" },
 ];
@@ -30,7 +31,7 @@ export function BottomNav() {
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
                 className={clsx(
-                  "flex min-h-[52px] items-center justify-center text-sm font-medium transition-colors",
+                  "flex min-h-[52px] items-center justify-center px-1 text-center text-xs font-medium transition-colors sm:text-sm",
                   active ? "text-ink" : "text-ink-muted"
                 )}
               >

@@ -12,14 +12,18 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "gym",
     color: "#1e6091",
     position: 0,
+    isStrength: true,
+    supportsPlanning: false,
     subtypes: [] as string[],
   },
   {
-    slug: "ithinkfit-olympus",
-    name: "iThinkFit Olympus",
+    slug: "ithinkfit-olympius",
+    name: "iThinkFit Olympius",
     goalSlug: "gym",
     color: "#2a7f7f",
     position: 1,
+    isStrength: true,
+    supportsPlanning: false,
     subtypes: [],
   },
   {
@@ -28,6 +32,8 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "gym",
     color: "#4a7c59",
     position: 2,
+    isStrength: true,
+    supportsPlanning: true,
     subtypes: ["Back", "Chest", "Legs", "Shoulders", "Abs and Calves"],
   },
   {
@@ -36,6 +42,8 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "cardio",
     color: "#a8762c",
     position: 3,
+    isStrength: false,
+    supportsPlanning: false,
     subtypes: [],
   },
   {
@@ -44,6 +52,8 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "cardio",
     color: "#c97b63",
     position: 4,
+    isStrength: false,
+    supportsPlanning: false,
     subtypes: [],
   },
   {
@@ -52,6 +62,8 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "cardio",
     color: "#a4553a",
     position: 5,
+    isStrength: false,
+    supportsPlanning: false,
     subtypes: [],
   },
   {
@@ -60,6 +72,8 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: "cardio",
     color: "#8a5a83",
     position: 6,
+    isStrength: false,
+    supportsPlanning: false,
     subtypes: [],
   },
   {
@@ -68,11 +82,24 @@ export const SEED_WORKOUT_TYPES = [
     goalSlug: null,
     color: "#566270",
     position: 7,
+    isStrength: false,
+    supportsPlanning: false,
     subtypes: [],
   },
 ];
 
 export const APPLE_HEALTH_TYPE_SLUG = "apple-health-import";
+
+export const RENAMED_TYPE_SLUGS: { from: string; to: string; name: string }[] = [
+  { from: "ithinkfit-olympus", to: "ithinkfit-olympius", name: "iThinkFit Olympius" },
+];
+
+export const SEED_SUPPLEMENT_SLOTS = [
+  { slug: "morning", name: "Morning", position: 0 },
+  { slug: "pre-workout", name: "Pre-workout", position: 1 },
+  { slug: "evening", name: "Evening", position: 2 },
+  { slug: "before-bed", name: "Before bed", position: 3 },
+];
 
 export const SEED_RECOVERY_TYPES = [
   { slug: "sauna", name: "Sauna", color: "#a4553a", position: 0 },

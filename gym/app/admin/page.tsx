@@ -4,6 +4,7 @@ import {
   exerciseItems,
   goalItems,
   recoveryTypeItems,
+  supplementItems,
   vacationItems,
   workoutTypeItems,
 } from "@/lib/admin-queries";
@@ -35,6 +36,13 @@ export default async function AdminPage() {
       count: recoveryTypeItems().filter((r) => !r.archived).length,
       noun: "type",
       blurb: "Sauna, red light, and anything else worth tracking.",
+    },
+    {
+      href: "/admin/supplements",
+      label: "Supplements",
+      count: supplementItems().filter((s) => !s.archived).length,
+      noun: "supplement",
+      blurb: "Your stack, what time of day each one is taken, and how often.",
     },
     {
       href: "/admin/vacations",

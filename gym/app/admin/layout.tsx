@@ -9,6 +9,7 @@ const SECTIONS = [
   { href: "/admin/goals", label: "Goals" },
   { href: "/admin/workout-types", label: "Workout types" },
   { href: "/admin/recovery-types", label: "Recovery" },
+  { href: "/admin/supplements", label: "Supplements" },
   { href: "/admin/vacations", label: "Vacations" },
   { href: "/admin/exercises", label: "Exercises" },
 ];

@@ -7,15 +7,20 @@ import {
   MUSCLE_GROUPS,
   recoveryLog,
   recoveryTypes,
+  SUPPLEMENT_SCHEDULES,
+  SUPPLEMENT_UNITS,
+  supplementLog,
+  supplements,
+  supplementSlots,
   vacations,
   workoutExercises,
   workouts,
   workoutSubtypes,
   workoutTypes,
 } from "./db/schema";
-import type { MuscleGroup } from "./db/schema";
-import { asBool, asInt, asString } from "./api";
-import { isValidIso } from "./dates";
+import type { MuscleGroup, SupplementSchedule, SupplementUnit } from "./db/schema";
+import { asBool, asFloat, asInt, asString } from "./api";
+import { isValidIso, todayIso } from "./dates";
 import { slugify } from "./slug";
 import { swatchOr } from "./swatches";
 
@@ -74,6 +79,103 @@ export function countWorkoutsForExercise(exerciseId: number): number {
       .where(eq(workoutExercises.exerciseId, exerciseId))
       .get()?.n ?? 0
   );
+}
+
+export function countSupplementsInSlot(slotId: number): number {
+  return (
+    db.select({ n: count() }).from(supplements).where(eq(supplements.slotId, slotId)).get()?.n ?? 0
+  );
+}
+
+export function countSupplementLogs(supplementId: number): number {
+  return (
+    db
+      .select({ n: count() })
+      .from(supplementLog)
+      .where(eq(supplementLog.supplementId, supplementId))
+      .get()?.n ?? 0
+  );
+}
+
+function parseWeekdays(raw: unknown): number[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(",")
+      : [];
+  const days = values
+    .map((v) => Number(String(v).trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7);
+  return [...new Set(days)].sort();
+}
+
+function parseSupplement(
+  body: Record<string, unknown>,
+  partial = false
+): { error: string } | { values: Partial<typeof supplements.$inferInsert> } {
+  const values: Partial<typeof supplements.$inferInsert> = {};
+
+  if (!partial || "name" in body) {
+    const name = asString(body.name);
+    if (!name) return { error: "Name is required." };
+    values.name = name;
+  }
+
+  if (!partial || "slotId" in body) {
+    const slotId = asInt(body.slotId);
+    if (slotId === null) return { error: "Pick a time of day." };
+    const slot = db.select().from(supplementSlots).where(eq(supplementSlots.id, slotId)).get();
+    if (!slot) return { error: "Unknown time of day." };
+    values.slotId = slot.id;
+  }
+
+  if (!partial || "dose" in body) values.dose = asFloat(body.dose);
+
+  if (!partial || "unit" in body) {
+    const unit = (asString(body.unit) ?? "capsule") as SupplementUnit;
+    if (!SUPPLEMENT_UNITS.includes(unit)) return { error: "Unknown unit." };
+    values.unit = unit;
+  }
+
+  const kind = (asString(body.scheduleKind) ?? (partial ? null : "daily")) as
+    | SupplementSchedule
+    | null;
+  if (kind !== null) {
+    if (!SUPPLEMENT_SCHEDULES.includes(kind)) return { error: "Unknown schedule." };
+    values.scheduleKind = kind;
+
+    if (kind === "weekdays") {
+      const days = parseWeekdays(body.scheduleDays);
+      if (days.length === 0) return { error: "Pick at least one weekday." };
+      values.scheduleDays = JSON.stringify(days);
+    } else {
+      values.scheduleDays = "[]";
+    }
+
+    if (kind === "interval") {
+      const every = asInt(body.intervalDays);
+      if (every === null || every < 1) return { error: "Interval must be at least 1 day." };
+      values.intervalDays = every;
+      const startsOn = asString(body.startsOn) ?? todayIso();
+      if (!isValidIso(startsOn)) return { error: "Start date must be YYYY-MM-DD." };
+      values.startsOn = startsOn;
+    } else {
+      values.intervalDays = null;
+    }
+  }
+
+  if ("startsOn" in body && values.startsOn === undefined) {
+    const startsOn = asString(body.startsOn);
+    if (startsOn !== null && !isValidIso(startsOn)) {
+      return { error: "Start date must be YYYY-MM-DD." };
+    }
+    values.startsOn = startsOn;
+  }
+
+  if ("notes" in body) values.notes = asString(body.notes);
+  if ("position" in body) values.position = asInt(body.position) ?? 0;
+
+  return { values };
 }
 
 export function countTypesForGoal(goalId: number): number {
@@ -368,6 +470,83 @@ export const ADMIN_ENTITIES: Record<string, Handler> = {
       const used = countWorkoutsForExercise(id);
       if (used > 0) return restrictedDelete("logged workouts", used);
       db.delete(exercises).where(eq(exercises.id, id)).run();
+      return { ok: true };
+    },
+  },
+
+  "supplement-slots": {
+    create(body) {
+      const name = asString(body.name);
+      if (!name) return { error: "Name is required." };
+      const slug = uniqueSlug(
+        name,
+        (s) => db.select().from(supplementSlots).where(eq(supplementSlots.slug, s)).get() !== undefined
+      );
+      const row = db
+        .insert(supplementSlots)
+        .values({ slug, name, position: asInt(body.position) ?? 0 })
+        .returning({ id: supplementSlots.id })
+        .get();
+      return { ok: true, id: row.id };
+    },
+    update(id, body) {
+      const patch: Partial<typeof supplementSlots.$inferInsert> = {};
+      if ("name" in body) {
+        const name = asString(body.name);
+        if (!name) return { error: "Name is required." };
+        patch.name = name;
+      }
+      if ("position" in body) patch.position = asInt(body.position) ?? 0;
+      db.update(supplementSlots).set(patch).where(eq(supplementSlots.id, id)).run();
+      return { ok: true };
+    },
+    archive(id, on) {
+      db.update(supplementSlots)
+        .set({ archivedAt: on ? nowSec() : null })
+        .where(eq(supplementSlots.id, id))
+        .run();
+      return { ok: true };
+    },
+    destroy(id) {
+      const used = countSupplementsInSlot(id);
+      if (used > 0) return restrictedDelete("supplements", used);
+      db.delete(supplementSlots).where(eq(supplementSlots.id, id)).run();
+      return { ok: true };
+    },
+  },
+
+  supplements: {
+    create(body) {
+      const parsed = parseSupplement(body);
+      if ("error" in parsed) return parsed;
+      const slug = uniqueSlug(
+        parsed.values.name!,
+        (s) => db.select().from(supplements).where(eq(supplements.slug, s)).get() !== undefined
+      );
+      const row = db
+        .insert(supplements)
+        .values({ slug, ...parsed.values } as typeof supplements.$inferInsert)
+        .returning({ id: supplements.id })
+        .get();
+      return { ok: true, id: row.id };
+    },
+    update(id, body) {
+      const parsed = parseSupplement(body, true);
+      if ("error" in parsed) return parsed;
+      db.update(supplements).set(parsed.values).where(eq(supplements.id, id)).run();
+      return { ok: true };
+    },
+    archive(id, on) {
+      db.update(supplements)
+        .set({ archivedAt: on ? nowSec() : null })
+        .where(eq(supplements.id, id))
+        .run();
+      return { ok: true };
+    },
+    destroy(id) {
+      const used = countSupplementLogs(id);
+      if (used > 0) return restrictedDelete("logged days", used);
+      db.delete(supplements).where(eq(supplements.id, id)).run();
       return { ok: true };
     },
   },
