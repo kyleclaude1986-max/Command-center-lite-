@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { BottomNav } from "@/components/BottomNav";
 import { RatingButtons } from "@/components/RatingButtons";
 import { DeleteWorkoutButton, DurationEditor } from "@/components/WorkoutActions";
+import { ExerciseLog } from "@/components/ExerciseLog";
 import { fmtIsoDay } from "@/lib/dates";
 import { fmtCalories, fmtDuration } from "@/lib/format";
+import { exerciseOptions, workoutLog, workoutVolume } from "@/lib/logbook";
 import { getRecoveryOn, getWorkout } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +26,9 @@ export default async function WorkoutDetailPage({
   const title = workout.subtypeName
     ? `${workout.typeName} — ${workout.subtypeName}`
     : workout.typeName;
+
+  const log = workout.isStrength ? workoutLog(workout.id) : [];
+  const volume = workout.isStrength ? workoutVolume(workout.id) : null;
 
   return (
     <>
@@ -58,6 +63,27 @@ export default async function WorkoutDetailPage({
             )}
           </p>
         </section>
+
+        {workout.isStrength && (
+          <ExerciseLog
+            workoutId={workout.id}
+            entries={log}
+            options={exerciseOptions()}
+            canPrefill={workout.planId !== null}
+          />
+        )}
+
+        {volume !== null && volume.sets > 0 && (
+          <section className="card card-pad">
+            <h2 className="section-title mb-3">Working volume</h2>
+            <p className="text-sm">
+              <span className="tabular-nums">{volume.sets}</span> sets ·{" "}
+              <span className="tabular-nums">{volume.reps}</span> reps ·{" "}
+              <span className="tabular-nums">{fmtCalories(volume.volumeLb)}</span> lb moved
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">Warmups excluded.</p>
+          </section>
+        )}
 
         <section className="card card-pad">
           <h2 className="section-title mb-3">How was it</h2>

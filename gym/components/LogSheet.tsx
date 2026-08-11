@@ -67,12 +67,12 @@ export function LogSheet({
           recoveryTypeIds: recovery,
         }),
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         setError(body.error ?? "Could not save that.");
         return;
       }
-      router.push("/");
+      router.push(selected?.isStrength && body.id ? `/workouts/${body.id}` : "/");
       router.refresh();
     } finally {
       setSaving(false);

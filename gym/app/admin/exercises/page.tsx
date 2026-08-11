@@ -1,17 +1,9 @@
 import { AdminList } from "@/components/admin/AdminList";
 import { isElevated } from "@/lib/admin-auth";
 import { exerciseItems } from "@/lib/admin-queries";
+import { MUSCLE_GROUP_OPTIONS } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
-
-const GROUPS = [
-  { value: "back", label: "Back" },
-  { value: "chest", label: "Chest" },
-  { value: "legs", label: "Legs" },
-  { value: "shoulders", label: "Shoulders" },
-  { value: "abs_calves", label: "Abs and calves" },
-  { value: "other", label: "Other" },
-];
 
 export default async function AdminExercisesPage() {
   if (!(await isElevated())) return null;
@@ -25,7 +17,7 @@ export default async function AdminExercisesPage() {
       items={exerciseItems()}
       fields={[
         { key: "name", label: "Name", type: "text", placeholder: "Cable Crunch" },
-        { key: "muscleGroup", label: "Muscle group", type: "select", options: GROUPS },
+        { key: "muscleGroup", label: "Muscle group", type: "select", options: MUSCLE_GROUP_OPTIONS },
       ]}
     />
   );

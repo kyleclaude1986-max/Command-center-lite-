@@ -1,12 +1,9 @@
 import { and, desc, eq, isNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "./db/client";
 import {
-  exercises,
-  exerciseSets,
   goals,
   recoveryLog,
   recoveryTypes,
-  workoutExercises,
   workouts,
   workoutSubtypes,
   workoutTypes,
@@ -35,6 +32,8 @@ export type WorkoutRow = {
   notes: string | null;
   calendarSyncState: string;
   provisional: boolean;
+  isStrength: boolean;
+  planId: number | null;
 };
 
 export type RecoveryRow = {
@@ -109,6 +108,8 @@ function mapWorkoutRow(row: {
     notes: row.workout.notes,
     calendarSyncState: row.workout.calendarSyncState,
     provisional,
+    isStrength: row.type.isStrength,
+    planId: row.workout.planId,
   };
 }
 
@@ -248,40 +249,3 @@ export function getRatingAveragesBySubtype(): RatingAverage[] {
     .sort((a, b) => b.average - a.average);
 }
 
-export type ExerciseHistorySet = { reps: number | null; weightLb: number | null };
-
-export function getLastSetsForExercise(
-  exerciseId: number,
-  beforeWorkoutId?: number
-): ExerciseHistorySet[] {
-  const candidates = db
-    .select({
-      workoutExerciseId: workoutExercises.id,
-      performedOn: workouts.performedOn,
-      workoutId: workouts.id,
-    })
-    .from(workoutExercises)
-    .innerJoin(workouts, eq(workouts.id, workoutExercises.workoutId))
-    .where(and(eq(workoutExercises.exerciseId, exerciseId), isNull(workouts.deletedAt)))
-    .orderBy(desc(workouts.performedOn), desc(workouts.id))
-    .all();
-
-  const previous = candidates.find((c) => c.workoutId !== beforeWorkoutId);
-  if (!previous) return [];
-
-  return db
-    .select({ reps: exerciseSets.reps, weightLb: exerciseSets.weightLb })
-    .from(exerciseSets)
-    .where(eq(exerciseSets.workoutExerciseId, previous.workoutExerciseId))
-    .orderBy(exerciseSets.setNumber)
-    .all();
-}
-
-export function getActiveExercises() {
-  return db
-    .select()
-    .from(exercises)
-    .where(isNull(exercises.archivedAt))
-    .orderBy(exercises.muscleGroup, exercises.name)
-    .all();
-}

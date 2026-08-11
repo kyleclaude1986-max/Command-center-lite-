@@ -20,11 +20,13 @@ runSeed();
 
 const supplementsLib = require("../lib/supplements") as typeof import("../lib/supplements");
 const planning = require("../lib/planning") as typeof import("../lib/planning");
+const logbook = require("../lib/logbook") as typeof import("../lib/logbook");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
 const {
   exercises,
+  exerciseSets,
   goals,
   planExercises,
   planSets,
@@ -373,6 +375,7 @@ const subtypes = db
   .all();
 const backDay = subtypes.find((s: { slug: string }) => s.slug === "back")!;
 const legsDay = subtypes.find((s: { slug: string }) => s.slug === "legs")!;
+const chestDay = subtypes.find((s: { slug: string }) => s.slug === "chest")!;
 
 function templateDay(dayOfWeek: number, subtypeId: number, exerciseCount = 5) {
   db.insert(planTemplateDays)
@@ -693,6 +696,136 @@ check(
     exerciseCount: planning.PLAN_LIMITS.exerciseCount.max,
   }),
   null
+);
+
+section("Exercise and set logging");
+const benchId = db.select().from(exercises).where(eq(exercises.slug, "barbell-bench-press")).get()!.id;
+const squatId = db.select().from(exercises).where(eq(exercises.slug, "back-squat")).get()!.id;
+
+const march = db
+  .insert(workouts)
+  .values({ performedOn: "2026-03-02", workoutTypeId: westO.id, workoutSubtypeId: chestDay.id })
+  .returning({ id: workouts.id })
+  .get();
+
+const firstBench = logbook.addExercise(march.id, benchId);
+check("a first-time exercise gets three blank sets", logbook.workoutLog(march.id)[0]?.sets.length, 3);
+check(
+  "a first-time exercise has no reps prefilled",
+  logbook.workoutLog(march.id)[0]?.sets.every((s) => s.reps === null && s.weightLb === null),
+  true
+);
+check(
+  "adding the same exercise twice does not duplicate it",
+  logbook.addExercise(march.id, benchId),
+  firstBench
+);
+
+const marchSets = logbook.workoutLog(march.id)[0]!.sets;
+marchSets.forEach((set, index) => {
+  logbook.updateSet(set.id, { reps: 8, weightLb: 185 + index * 10 });
+});
+check(
+  "sets save what was typed",
+  logbook.workoutLog(march.id)[0]?.sets.map((s) => `${s.reps}x${s.weightLb}`),
+  ["8x185", "8x195", "8x205"]
+);
+
+section("Prefilling the next session from the last one");
+const april = db
+  .insert(workouts)
+  .values({ performedOn: "2026-04-06", workoutTypeId: westO.id, workoutSubtypeId: chestDay.id })
+  .returning({ id: workouts.id })
+  .get();
+logbook.addExercise(april.id, benchId);
+const aprilEntry = logbook.workoutLog(april.id)[0]!;
+check("the new session copies the set count", aprilEntry.sets.length, 3);
+check(
+  "the new session copies last time's numbers",
+  aprilEntry.sets.map((s) => `${s.reps}x${s.weightLb}`),
+  ["8x185", "8x195", "8x205"]
+);
+check("last time is attributed to the right day", aprilEntry.lastTime?.performedOn, "2026-03-02");
+check(
+  "the earlier session is not told about the later one",
+  logbook.workoutLog(march.id)[0]?.lastTime,
+  null
+);
+
+section("Working volume");
+const volume = logbook.workoutVolume(march.id);
+check("volume counts every working set", volume.sets, 3);
+check("volume sums reps", volume.reps, 24);
+check("volume multiplies reps by weight", volume.volumeLb, 8 * 185 + 8 * 195 + 8 * 205);
+
+const warmupId = logbook.addSet(firstBench, true);
+logbook.updateSet(warmupId, { reps: 10, weightLb: 45 });
+check("a warmup is excluded from volume", logbook.workoutVolume(march.id).volumeLb, volume.volumeLb);
+check("a warmup still shows in the log", logbook.workoutLog(march.id)[0]?.sets.length, 4);
+logbook.removeSet(warmupId);
+
+section("Reordering and removing");
+logbook.addExercise(march.id, squatId);
+check(
+  "a second movement lands after the first",
+  logbook.workoutLog(march.id).map((e) => e.exercise.id),
+  [benchId, squatId]
+);
+check("moving the first one up does nothing", logbook.moveExercise(firstBench, "up"), false);
+check("moving the first one down works", logbook.moveExercise(firstBench, "down"), true);
+check(
+  "the order actually changed",
+  logbook.workoutLog(march.id).map((e) => e.exercise.id),
+  [squatId, benchId]
+);
+
+logbook.removeExercise(firstBench);
+const afterRemoval = logbook.workoutLog(march.id);
+check("removing leaves the other movement", afterRemoval.length, 1);
+check("positions close up after a removal", afterRemoval[0]?.position, 0);
+check(
+  "removing an exercise takes its sets with it",
+  db.select().from(exerciseSets).where(eq(exerciseSets.workoutExerciseId, firstBench)).all().length,
+  0
+);
+
+section("Starting a session from its plan");
+const planForLog = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.id, planForFallback.id))
+  .get()!;
+const fromPlan = db
+  .insert(workouts)
+  .values({
+    performedOn: "2026-05-04",
+    workoutTypeId: planForLog.workoutTypeId,
+    workoutSubtypeId: planForLog.workoutSubtypeId,
+  })
+  .returning({ id: workouts.id })
+  .get();
+
+const plannedCount = planning.planDetail(planForLog.id)!.exercises.length;
+check(
+  "the plan copies across",
+  logbook.prefillFromPlan(fromPlan.id, planForLog.id),
+  plannedCount
+);
+check("the session now has the planned movements", logbook.workoutLog(fromPlan.id).length, plannedCount);
+check(
+  "target reps arrive as logged reps to overwrite",
+  logbook.workoutLog(fromPlan.id)[0]?.sets.every((s) => s.reps !== null),
+  true
+);
+check(
+  "prefilling twice does not double up",
+  logbook.prefillFromPlan(fromPlan.id, planForLog.id),
+  0
+);
+check(
+  "the session still has the planned movements",
+  logbook.workoutLog(fromPlan.id).length,
+  plannedCount
 );
 
 section("Rest formatting");
