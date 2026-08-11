@@ -62,7 +62,7 @@ npm run dev                    # http://localhost:3001
 
 ```bash
 npm run typecheck
-npm run verify                 # 294 checks against a scratch database
+npm run verify                 # 303 checks against a scratch database
 npm run build
 ```
 

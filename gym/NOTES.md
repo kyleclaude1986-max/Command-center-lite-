@@ -34,7 +34,7 @@ of the June login failure. Worth merging whether or not the gym app moves out.
 
 ## Built and verified
 
-All of it, other than the port. 294 checks pass, `tsc --noEmit` is clean, the
+All of it, other than the port. 303 checks pass, `tsc --noEmit` is clean, the
 production build succeeds, and every page and API route was exercised over
 HTTP against a running server.
 
