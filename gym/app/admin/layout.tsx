@@ -13,6 +13,7 @@ const SECTIONS = [
   { href: "/admin/vacations", label: "Vacations" },
   { href: "/admin/exercises", label: "Exercises" },
   { href: "/admin/macro-targets", label: "Macro targets" },
+  { href: "/admin/calendar", label: "Calendar" },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

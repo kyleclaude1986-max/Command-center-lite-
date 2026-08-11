@@ -28,6 +28,8 @@ const energyLib = require("../lib/energy") as typeof import("../lib/energy");
 const sources = require("../lib/food/sources") as typeof import("../lib/food/sources");
 const diary = require("../lib/food/diary") as typeof import("../lib/food/diary");
 const macros = require("../lib/macros") as typeof import("../lib/macros");
+const ics = require("../lib/calendar/ics") as typeof import("../lib/calendar/ics");
+const calendar = require("../lib/calendar/sync") as typeof import("../lib/calendar/sync");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
@@ -1340,6 +1342,198 @@ check(
   "missed"
 );
 check("a missed today drops the streak to what came before", macros.nutritionStreak(NUT_TODAY), 0);
+
+section("Calendar events");
+const timedEvent = ics.buildEvent({
+  uid: "gym-workout-1@iron-log",
+  title: "West O Strength — Chest",
+  performedOn: "2026-08-10",
+  startedAt: Math.floor(Date.parse("2026-08-10T11:04:00Z") / 1000),
+  durationSec: 3510,
+  rating: 4,
+  recovery: ["Sauna"],
+  topSet: "Barbell Bench Press 6 x 245 lb",
+  sequence: 0,
+});
+
+check("an event opens and closes properly", timedEvent.startsWith("BEGIN:VCALENDAR\r\n"), true);
+check("it ends the calendar", timedEvent.trimEnd().endsWith("END:VCALENDAR"), true);
+check("lines are CRLF terminated", timedEvent.includes("\r\n"), true);
+check("the uid carries through", timedEvent.includes("UID:gym-workout-1@iron-log"), true);
+check(
+  "a workout with a start time becomes a timed event",
+  timedEvent.includes("DTSTART:20260810T110400Z"),
+  true
+);
+check(
+  "the end is start plus duration",
+  timedEvent.includes("DTEND:20260810T120230Z"),
+  true
+);
+check(
+  "no unfolded line exceeds 75 octets",
+  timedEvent
+    .split("\r\n")
+    .filter((line) => !line.startsWith(" "))
+    .every((line) => Buffer.from(line, "utf8").length <= 75),
+  true
+);
+
+const allDay = ics.buildEvent({
+  uid: "gym-workout-2@iron-log",
+  title: "iThinkFit Olympius",
+  performedOn: "2026-08-10",
+  startedAt: null,
+  durationSec: null,
+  rating: null,
+  recovery: [],
+  topSet: null,
+  sequence: 0,
+});
+check(
+  "a workout with no start time becomes an all-day event",
+  allDay.includes("DTSTART;VALUE=DATE:20260810"),
+  true
+);
+check("an all-day event ends the next day", allDay.includes("DTEND;VALUE=DATE:20260811"), true);
+check("an event with nothing to say has no description", allDay.includes("DESCRIPTION:"), false);
+
+const risky = ics.buildEvent({
+  uid: "gym-workout-3@iron-log",
+  title: "Legs; heavy, then abs",
+  performedOn: "2026-08-10",
+  startedAt: null,
+  durationSec: null,
+  rating: null,
+  recovery: [],
+  topSet: null,
+  sequence: 0,
+});
+check(
+  "a semicolon in the title is escaped",
+  risky.includes("SUMMARY:Legs\\; heavy\\, then abs"),
+  true
+);
+
+check(
+  "the description carries duration, rating, top set, and recovery",
+  ics.buildDescription({
+    uid: "x",
+    title: "x",
+    performedOn: "2026-08-10",
+    startedAt: null,
+    durationSec: 3510,
+    rating: 4,
+    recovery: ["Sauna", "Red light"],
+    topSet: "Bench 6 x 245 lb",
+    sequence: 0,
+  }),
+  "59 min · 4/5 · Top set Bench 6 x 245 lb · Sauna, Red light"
+);
+
+section("Reading classes off a calendar");
+const ICS_FEED = [
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "BEGIN:VEVENT",
+  "UID:class-abc",
+  "SUMMARY:Olympius 5:30am",
+  "DTSTART:20260810T113000Z",
+  "DTEND:20260810T123000Z",
+  "END:VEVENT",
+  "END:VCALENDAR",
+].join("\r\n");
+
+const scanned = calendar.parseCalendarObjects([{ data: ICS_FEED }]);
+check("an event parses out of a calendar object", scanned.length, 1);
+check("its title comes through", scanned[0]?.title, "Olympius 5:30am");
+check(
+  "its start is read as an instant",
+  scanned[0]?.startsAt,
+  Math.floor(Date.parse("2026-08-10T11:30:00Z") / 1000)
+);
+check(
+  "an unparseable object does not sink the batch",
+  calendar.parseCalendarObjects([{ data: "not a calendar" }, { data: ICS_FEED }]).length,
+  1
+);
+check("an object with no data is skipped", calendar.parseCalendarObjects([{}]).length, 0);
+
+section("Guessing a workout type from a class title");
+check(
+  "an archived type is never guessed at",
+  calendar.guessTypeFor("Olympius 5:30am"),
+  null
+);
+db.update(workoutTypes)
+  .set({ archivedAt: null })
+  .where(eq(workoutTypes.slug, "ithinkfit-olympius"))
+  .run();
+check(
+  "Olympius is recognised once it is back",
+  calendar.guessTypeFor("Olympius 5:30am"),
+  typeId("ithinkfit-olympius")
+);
+check(
+  "Gym Fit Camp is recognised",
+  calendar.guessTypeFor("GYM FIT CAMP with Sam"),
+  typeId("ithinkfit-gym-fit-camp")
+);
+check("West O is recognised", calendar.guessTypeFor("West O — open gym"), typeId("west-o-strength"));
+check("a run is recognised", calendar.guessTypeFor("Morning run"), typeId("running"));
+check("something unrelated is not guessed at", calendar.guessTypeFor("Dentist"), null);
+check(
+  "a substring does not produce a false match",
+  calendar.guessTypeFor("Sidewalk repair"),
+  null
+);
+
+section("Scanned calendar settings");
+check("nothing is scanned by default", calendar.scannedCalendarNames(), []);
+calendar.setScannedCalendars(["Kyle", "Family"]);
+check("the choice is stored", calendar.scannedCalendarNames(), ["Kyle", "Family"]);
+calendar.setScannedCalendars([]);
+check("it can be cleared", calendar.scannedCalendarNames(), []);
+
+section("Calendar push queue");
+db.delete(workouts).run();
+const toPush = db
+  .insert(workouts)
+  .values({ performedOn: TODAY, workoutTypeId: westO.id, calendarSyncState: "pending" })
+  .returning({ id: workouts.id })
+  .get();
+const fromCalendar = db
+  .insert(workouts)
+  .values({ performedOn: TODAY, workoutTypeId: westO.id, calendarSyncState: "skipped" })
+  .returning({ id: workouts.id })
+  .get();
+
+check("a pending workout is queued", calendar.pendingPushCount(), 1);
+check(
+  "a workout that came off the calendar is never pushed back",
+  db.select().from(workouts).where(eq(workouts.id, fromCalendar.id)).get()?.calendarSyncState,
+  "skipped"
+);
+
+db.update(workouts)
+  .set({ calendarSyncState: "synced" })
+  .where(eq(workouts.id, toPush.id))
+  .run();
+check("a synced workout leaves the queue", calendar.pendingPushCount(), 0);
+
+calendar.markForResync(toPush.id);
+check("marking one for resync puts it back", calendar.pendingPushCount(), 1);
+
+calendar.markForResync(fromCalendar.id);
+check(
+  "a skipped workout stays skipped even when asked to resync",
+  calendar.pendingPushCount(),
+  1
+);
+
+db.update(workouts).set({ calendarSyncState: "synced" }).where(eq(workouts.id, toPush.id)).run();
+check("resyncing everything queues only what is pushable", calendar.resyncAll(), 1);
+check("and the count agrees", calendar.pendingPushCount(), 1);
 
 section("Rest formatting");
 check("under a minute reads in seconds", format.fmtRest(45), "45s");

@@ -6,11 +6,13 @@ import { RatingButtons } from "@/components/RatingButtons";
 import { WorkoutListItem } from "@/components/WorkoutListItem";
 import { SupplementSlots, type SlotGroupView } from "@/components/SupplementSlots";
 import { NetCalories } from "@/components/NetCalories";
+import { ScheduledClasses, type ScheduledView } from "@/components/ScheduledClasses";
 import { fmtIsoDay, fmtIsoRelative, todayIso } from "@/lib/dates";
 import { goalSummaries } from "@/lib/goals";
-import { fmtRest, pluralize } from "@/lib/format";
+import { fmtRest, fmtTime, pluralize } from "@/lib/format";
 import {
   getActiveRecoveryTypes,
+  getLoggableWorkoutTypes,
   getRecoveryOn,
   getUnratedWorkouts,
   getWorkoutsOn,
@@ -18,6 +20,8 @@ import {
 import { slotGroupsFor, supplementDay, supplementStreak } from "@/lib/supplements";
 import { GenerateButton } from "@/components/PlanActions";
 import { energyOn } from "@/lib/energy";
+import { pendingScheduled } from "@/lib/calendar/sync";
+import "@/lib/bootstrap";
 import { planDetail, plansInRange } from "@/lib/planning";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +50,15 @@ export default function HomePage() {
   const supplementsTaken = supplements.due.filter((s) => supplements.takenIds.has(s.id)).length;
   const supplementStreakDays = supplementStreak(today);
   const energy = energyOn(today);
+  const scheduled: ScheduledView[] = pendingScheduled(today).map((row) => ({
+    id: row.scheduled.id,
+    title: row.scheduled.title,
+    scheduledOn: row.scheduled.scheduledOn,
+    when: `${fmtIsoRelative(row.scheduled.scheduledOn, today)} · ${fmtTime(row.scheduled.startsAt)}`,
+    guessedTypeId: row.scheduled.guessedTypeId,
+    guessedTypeName: row.type?.name ?? null,
+  }));
+  const loggableTypes = scheduled.length > 0 ? getLoggableWorkoutTypes() : [];
   const todayPlan = plansInRange(today, today)[0] ?? null;
   const todayPlanDetail =
     todayPlan && todayPlan.exerciseCountGenerated > 0 ? planDetail(todayPlan.plan.id) : null;
@@ -129,6 +142,13 @@ export default function HomePage() {
         {summaries.map((summary) => (
           <GoalCard key={summary.goal.id} summary={summary} />
         ))}
+
+        {scheduled.length > 0 && (
+          <ScheduledClasses
+            items={scheduled}
+            types={loggableTypes.map((type) => ({ id: type.id, name: type.name }))}
+          />
+        )}
 
         {(energy.netKcal !== null || energy.hasFood) && <NetCalories energy={energy} />}
 
