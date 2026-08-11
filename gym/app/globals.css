@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    font-feature-settings: "ss01", "cv11";
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-paper-card border border-paper-line shadow-sm;
+  }
+  .card-pad {
+    @apply p-5;
+  }
+  .section-title {
+    @apply text-xs uppercase tracking-[0.18em] text-ink-muted font-medium;
+  }
+  .metric-value {
+    @apply text-3xl font-semibold text-ink;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center rounded-xl px-4 min-h-[44px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-paper hover:bg-ink-soft;
+  }
+  .btn-secondary {
+    @apply btn border border-paper-line bg-paper-card text-ink hover:bg-paper;
+  }
+  .btn-danger {
+    @apply btn border border-state-miss text-state-miss hover:bg-state-miss hover:text-paper-card;
+  }
+  .field {
+    @apply w-full rounded-xl border border-paper-line bg-paper-card px-3 min-h-[44px] text-ink outline-none focus:border-accent-warm;
+  }
+  .field-label {
+    @apply block text-xs uppercase tracking-[0.14em] text-ink-muted font-medium mb-1.5;
+  }
+}
