@@ -14,6 +14,7 @@ const TABS = [
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
+  if (href === "/body") return pathname.startsWith("/body") || pathname.startsWith("/photos");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

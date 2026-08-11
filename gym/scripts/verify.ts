@@ -21,6 +21,7 @@ runSeed();
 const supplementsLib = require("../lib/supplements") as typeof import("../lib/supplements");
 const planning = require("../lib/planning") as typeof import("../lib/planning");
 const logbook = require("../lib/logbook") as typeof import("../lib/logbook");
+const body = require("../lib/body") as typeof import("../lib/body");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
@@ -826,6 +827,85 @@ check(
   "the session still has the planned movements",
   logbook.workoutLog(fromPlan.id).length,
   plannedCount
+);
+
+section("Body metrics");
+check(
+  "a first reading is created",
+  body.recordMetrics("2026-06-01", { weightLb: 205, fatMassLb: 41, muscleMassLb: 78 }).created,
+  true
+);
+check(
+  "a second reading the same day merges rather than stacking",
+  body.recordMetrics("2026-06-01", { weightLb: 204.2 }).created,
+  false
+);
+check("the merged reading kept the new weight", body.metricsInRange("2026-06-01", "2026-06-01")[0]?.weightLb, 204.2);
+check(
+  "a field left out of the second reading survives",
+  body.metricsInRange("2026-06-01", "2026-06-01")[0]?.fatMassLb,
+  41
+);
+check(
+  "one day means one row",
+  body.metricsInRange("2026-06-01", "2026-06-01").length,
+  1
+);
+check(
+  "a field sent as null is cleared",
+  (() => {
+    body.recordMetrics("2026-06-01", { muscleMassLb: null });
+    return body.metricsInRange("2026-06-01", "2026-06-01")[0]?.muscleMassLb;
+  })(),
+  null
+);
+
+body.recordMetrics("2026-07-01", { weightLb: 200, fatMassLb: 36 });
+body.recordMetrics("2026-08-01", { weightLb: 196, fatMassLb: 33 });
+
+section("Body metric series");
+const weightSeries = body.seriesFor("weightLb", 90, "2026-08-12");
+check("the series picks up every reading in the window", weightSeries.points.length, 3);
+check("the series runs oldest to newest", weightSeries.points[0]?.measuredOn, "2026-06-01");
+check("the latest value is the most recent one", weightSeries.latest, 196);
+check(
+  "the change is measured against the oldest reading",
+  Math.round((weightSeries.change ?? 0) * 10) / 10,
+  -8.2
+);
+check(
+  "a reading outside the window is left out",
+  body.seriesFor("weightLb", 30, "2026-08-12").points.length,
+  1
+);
+check(
+  "a metric never recorded has no points",
+  body.seriesFor("bodyFatPct", 90, "2026-08-12").points.length,
+  0
+);
+check(
+  "a single reading has no change to report",
+  body.seriesFor("weightLb", 30, "2026-08-12").change,
+  null
+);
+
+section("Derived body fat");
+const august = body.metricsInRange("2026-08-01", "2026-08-01")[0]!;
+check("body fat is worked out from weight and fat mass", body.derivedBodyFatPct(august), 16.8);
+body.recordMetrics("2026-08-01", { bodyFatPct: 15.2 });
+check(
+  "a measured percentage wins over the derived one",
+  body.derivedBodyFatPct(body.metricsInRange("2026-08-01", "2026-08-01")[0]!),
+  15.2
+);
+check(
+  "nothing is invented without the inputs",
+  body.derivedBodyFatPct({
+    ...august,
+    weightLb: null,
+    bodyFatPct: null,
+  }),
+  null
 );
 
 section("Rest formatting");

@@ -71,6 +71,10 @@ export function fmtIsoDayNumber(iso: IsoDate): string {
   return formatInTimeZone(dateFromIso(iso), "UTC", "d");
 }
 
+export function fmtIsoShort(iso: IsoDate): string {
+  return formatInTimeZone(dateFromIso(iso), "UTC", "MMM d");
+}
+
 export function fmtIsoMonth(iso: IsoDate): string {
   return formatInTimeZone(dateFromIso(iso), "UTC", "MMMM yyyy");
 }
