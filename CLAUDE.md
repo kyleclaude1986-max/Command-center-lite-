@@ -6,19 +6,20 @@
 
 ---
 
-## There are two apps in this repo
+## This repo is Command Center only
 
-**Command Center** (repo root) — the business dashboard. Calendars, Bloom
-to-dos, NetSuite sales. Branch `claude/command-center-dashboard-fNKIH`.
-Everything below about NetSuite, Bloom, and Microsoft Graph is about this one.
+The business dashboard: calendars, Bloom to-dos, NetSuite sales. Branch
+`claude/command-center-dashboard-fNKIH`. Everything in this file is about that.
 
-**Gym tracker** (`gym/`) — Kyle's personal training log. Branch
-`claude/personal-gym-tracker-nflrle`, draft PR #1. **It has its own memory file
-at `gym/NOTES.md` — read that, not this, for anything gym-related.** It is
-complete and verified apart from one blocked step: it is meant to move to its
-own repo called `iron-log`, and repository creation is refused with
-`403 Resource not accessible by integration`. Kyle needs to create an empty
-private `iron-log` repo before the port can happen.
+**The gym tracker has moved out.** It lives in
+`kyleclaude1986-max/iron-log` as of 2026-08-11, ported with `git subtree split`
+so its history came with it. Anything gym-related belongs there, and that repo
+has its own `NOTES.md`. The `gym/` directory on branch
+`claude/personal-gym-tracker-nflrle` here is frozen history — do not work in it.
+
+**PR #1 is still worth merging.** Besides the gym app it carries the `.env`
+dollar-sign fix, which is the actual cause of the Command Center login failure
+described below.
 
 ## Session pickup checklist
 
