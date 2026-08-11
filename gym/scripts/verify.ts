@@ -19,16 +19,26 @@ migrate(db, { migrationsFolder: "./drizzle" });
 runSeed();
 
 const supplementsLib = require("../lib/supplements") as typeof import("../lib/supplements");
+const planning = require("../lib/planning") as typeof import("../lib/planning");
+const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
+const format = require("../lib/format") as typeof import("../lib/format");
 
 const {
+  exercises,
   goals,
+  planExercises,
+  planSets,
+  planTemplateDays,
+  planTemplates,
   recoveryLog,
   recoveryTypes,
   supplementLog,
   supplements,
   supplementSlots,
   vacations,
+  workoutPlans,
   workouts,
+  workoutSubtypes,
   workoutTypes,
 } = schema;
 const { addDaysIso, diffDaysIso, weekStartIso } = dates;
@@ -348,6 +358,349 @@ check(
     .map((t: { slug: string }) => t.slug),
   ["west-o-strength"]
 );
+
+section("Plan materialization");
+reset();
+db.delete(workoutPlans).run();
+db.delete(planTemplateDays).run();
+
+const template = db.select().from(planTemplates).get()!;
+const westO = db.select().from(workoutTypes).where(eq(workoutTypes.slug, "west-o-strength")).get()!;
+const subtypes = db
+  .select()
+  .from(workoutSubtypes)
+  .where(eq(workoutSubtypes.workoutTypeId, westO.id))
+  .all();
+const backDay = subtypes.find((s: { slug: string }) => s.slug === "back")!;
+const legsDay = subtypes.find((s: { slug: string }) => s.slug === "legs")!;
+
+function templateDay(dayOfWeek: number, subtypeId: number, exerciseCount = 5) {
+  db.insert(planTemplateDays)
+    .values({
+      templateId: template.id,
+      dayOfWeek,
+      workoutTypeId: westO.id,
+      workoutSubtypeId: subtypeId,
+      targetRepsLow: 8,
+      targetRepsHigh: 12,
+      restSeconds: 90,
+      exerciseCount,
+    })
+    .run();
+}
+
+templateDay(1, backDay.id);
+templateDay(3, legsDay.id);
+
+const first = planning.materializePlans(WEEK, 4);
+check("four weeks of a two-day template creates eight plans", first.created, 8);
+check("nothing to update on a fresh fill", first.updated, 0);
+
+const second = planning.materializePlans(WEEK, 4);
+check("re-running creates nothing new", second.created, 0);
+check("re-running updates nothing", second.updated, 0);
+
+const mondayPlan = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.plannedOn, WEEK))
+  .get()!;
+check("Monday maps to the back day", mondayPlan.workoutSubtypeId, backDay.id);
+const wednesdayPlan = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.plannedOn, addDaysIso(WEEK, 2)))
+  .get()!;
+check("Wednesday maps to the leg day", wednesdayPlan.workoutSubtypeId, legsDay.id);
+check(
+  "Tuesday has no plan",
+  db.select().from(workoutPlans).where(eq(workoutPlans.plannedOn, addDaysIso(WEEK, 1))).get(),
+  undefined
+);
+
+db.update(planTemplateDays)
+  .set({ exerciseCount: 7 })
+  .where(eq(planTemplateDays.dayOfWeek, 1))
+  .run();
+const third = planning.materializePlans(WEEK, 4);
+check("a template change updates untouched plans", third.updated, 4);
+check(
+  "the change reached the plan",
+  db.select().from(workoutPlans).where(eq(workoutPlans.plannedOn, WEEK)).get()?.exerciseCount,
+  7
+);
+
+db.update(workoutPlans)
+  .set({ isOverride: true, exerciseCount: 3 })
+  .where(eq(workoutPlans.id, mondayPlan.id))
+  .run();
+db.update(planTemplateDays)
+  .set({ exerciseCount: 9 })
+  .where(eq(planTemplateDays.dayOfWeek, 1))
+  .run();
+planning.materializePlans(WEEK, 4);
+check(
+  "an overridden day survives re-materialising",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, mondayPlan.id)).get()?.exerciseCount,
+  3
+);
+
+section("Deterministic fallback generator");
+db.delete(planExercises).run();
+const planForFallback = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.id, wednesdayPlan.id))
+  .get()!;
+const generated = planning.generateFallback(planForFallback, westO, legsDay);
+check("generates the requested number of exercises", generated.length, planForFallback.exerciseCount);
+
+const legIds = new Set(
+  db
+    .select()
+    .from(exercises)
+    .all()
+    .filter((e: { muscleGroup: string }) => e.muscleGroup === "legs")
+    .map((e: { id: number }) => e.id)
+);
+check(
+  "every exercise comes from the right muscle group",
+  generated.every((entry) => legIds.has(entry.exerciseId)),
+  true
+);
+check(
+  "no exercise is repeated",
+  new Set(generated.map((e) => e.exerciseId)).size,
+  generated.length
+);
+check(
+  "reps land inside the requested range",
+  generated.every((entry) =>
+    entry.sets.every(
+      (set) =>
+        set.targetReps !== null &&
+        set.targetReps >= planForFallback.targetRepsLow &&
+        set.targetReps <= planForFallback.targetRepsHigh
+    )
+  ),
+  true
+);
+
+planning.writeGeneratedPlan(planForFallback.id, generated, "fallback");
+const detail = planning.planDetail(planForFallback.id)!;
+check("written plan reads back with its exercises", detail.exercises.length, generated.length);
+check(
+  "written plan has sets",
+  detail.exercises.every((e) => e.sets.length > 0),
+  true
+);
+check(
+  "the plan is marked generated",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, planForFallback.id)).get()?.status,
+  "generated"
+);
+
+planning.writeGeneratedPlan(planForFallback.id, generated, "fallback");
+check(
+  "regenerating replaces rather than duplicates",
+  db.select().from(planExercises).where(eq(planExercises.planId, planForFallback.id)).all().length,
+  generated.length
+);
+check(
+  "orphaned sets are cleaned up with their exercises",
+  db.select().from(planSets).all().length,
+  generated.reduce((total, entry) => total + entry.sets.length, 0)
+);
+
+section("Library constraint with an empty group");
+const emptyPlan = { ...planForFallback, exerciseCount: 5 };
+const noLibrary = planning.generateFallback(
+  emptyPlan,
+  westO,
+  { ...legsDay, slug: "nonexistent-group" } as typeof legsDay
+);
+check(
+  "an unmapped sub-day falls back to the whole library rather than producing nothing",
+  noLibrary.length,
+  5
+);
+
+section("Rejecting a hallucinated exercise");
+const legLibrary = planning.libraryFor(["legs"]);
+const realId = legLibrary[0]!.id;
+const inventedId = Math.max(...db.select().from(exercises).all().map((e) => e.id)) + 500;
+
+function response(ids: number[]) {
+  return {
+    summary: "test",
+    exercises: ids.map((exerciseId) => ({
+      exerciseId,
+      note: null,
+      sets: [{ targetReps: 10, targetWeightLb: null, isWarmup: false }],
+    })),
+  };
+}
+
+const rejected = generator.validate(response([realId, inventedId]), legLibrary, 2);
+check("an id outside the library is rejected", "error" in rejected, true);
+check(
+  "the rejection names the offending id",
+  "error" in rejected && rejected.error.includes(String(inventedId)),
+  true
+);
+
+const accepted = generator.validate(response([realId]), legLibrary, 2);
+check("a response drawn from the library is accepted", "exercises" in accepted, true);
+
+const duplicated = generator.validate(response([realId, realId]), legLibrary, 2);
+check(
+  "a repeated exercise is collapsed rather than rejected",
+  "exercises" in duplicated ? duplicated.exercises.length : -1,
+  1
+);
+
+const overLong = generator.validate(
+  response(legLibrary.slice(0, 4).map((e) => e.id)),
+  legLibrary,
+  2
+);
+check(
+  "more exercises than asked for are trimmed to the request",
+  "exercises" in overLong ? overLong.exercises.length : -1,
+  2
+);
+
+const emptySets = generator.validate(
+  { summary: "test", exercises: [{ exerciseId: realId, note: null, sets: [] }] },
+  legLibrary,
+  2
+);
+check("a response with no sets anywhere is rejected", "error" in emptySets, true);
+
+section("Logging a workout against a plan");
+const planToComplete = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.id, planForFallback.id))
+  .get()!;
+const loggedOnPlan = db
+  .insert(workouts)
+  .values({
+    performedOn: planToComplete.plannedOn,
+    workoutTypeId: planToComplete.workoutTypeId,
+    workoutSubtypeId: planToComplete.workoutSubtypeId,
+    durationSec: 3600,
+  })
+  .returning({ id: workouts.id })
+  .get();
+
+check(
+  "logging on a planned day claims the plan",
+  planning.linkWorkoutToPlan(loggedOnPlan.id, planToComplete.plannedOn, planToComplete.workoutTypeId),
+  planToComplete.id
+);
+check(
+  "the plan is marked completed",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, planToComplete.id)).get()?.status,
+  "completed"
+);
+check(
+  "the plan points at the workout",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, planToComplete.id)).get()?.workoutId,
+  loggedOnPlan.id
+);
+check(
+  "the workout points back at the plan",
+  db.select().from(workouts).where(eq(workouts.id, loggedOnPlan.id)).get()?.planId,
+  planToComplete.id
+);
+
+const secondOnSameDay = db
+  .insert(workouts)
+  .values({
+    performedOn: planToComplete.plannedOn,
+    workoutTypeId: planToComplete.workoutTypeId,
+    durationSec: 1800,
+  })
+  .returning({ id: workouts.id })
+  .get();
+check(
+  "a second workout that day does not steal the claimed plan",
+  planning.linkWorkoutToPlan(
+    secondOnSameDay.id,
+    planToComplete.plannedOn,
+    planToComplete.workoutTypeId
+  ),
+  null
+);
+check(
+  "the plan still points at the first workout",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, planToComplete.id)).get()?.workoutId,
+  loggedOnPlan.id
+);
+
+const unplannedDay = addDaysIso(planToComplete.plannedOn, 1);
+const unplanned = db
+  .insert(workouts)
+  .values({
+    performedOn: unplannedDay,
+    workoutTypeId: planToComplete.workoutTypeId,
+    durationSec: 1800,
+  })
+  .returning({ id: workouts.id })
+  .get();
+check(
+  "a workout on an unplanned day links to nothing",
+  planning.linkWorkoutToPlan(unplanned.id, unplannedDay, planToComplete.workoutTypeId),
+  null
+);
+
+section("Plan parameter bounds");
+const sane = { targetRepsLow: 8, targetRepsHigh: 12, restSeconds: 90, exerciseCount: 6 };
+check("a sensible week passes", planning.planParamError(sane), null);
+check(
+  "ninety-nine exercises is rejected",
+  planning.planParamError({ ...sane, exerciseCount: 99 }) !== null,
+  true
+);
+check(
+  "zero exercises is rejected",
+  planning.planParamError({ ...sane, exerciseCount: 0 }) !== null,
+  true
+);
+check(
+  "an inverted rep range is rejected",
+  planning.planParamError({ ...sane, targetRepsLow: 12, targetRepsHigh: 6 }),
+  "the low rep target cannot exceed the high one"
+);
+check(
+  "a hundred reps is rejected",
+  planning.planParamError({ ...sane, targetRepsHigh: 100 }) !== null,
+  true
+);
+check(
+  "an hour of rest is rejected",
+  planning.planParamError({ ...sane, restSeconds: 3600 }) !== null,
+  true
+);
+check("no rest at all is allowed", planning.planParamError({ ...sane, restSeconds: 0 }), null);
+check(
+  "the upper bounds themselves are allowed",
+  planning.planParamError({
+    targetRepsLow: 1,
+    targetRepsHigh: planning.PLAN_LIMITS.reps.max,
+    restSeconds: planning.PLAN_LIMITS.restSeconds.max,
+    exerciseCount: planning.PLAN_LIMITS.exerciseCount.max,
+  }),
+  null
+);
+
+section("Rest formatting");
+check("under a minute reads in seconds", format.fmtRest(45), "45s");
+check("ninety seconds reads as a minute and a half", format.fmtRest(90), "1:30");
+check("two minutes reads evenly", format.fmtRest(120), "2:00");
+check("three minutes reads evenly", format.fmtRest(180), "3:00");
+check("no rest reads as a dash", format.fmtRest(0), "—");
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) process.exit(1);

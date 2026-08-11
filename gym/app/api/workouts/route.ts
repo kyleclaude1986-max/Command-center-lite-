@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { recoveryLog, workouts, workoutSubtypes, workoutTypes } from "@/lib/db/schema";
 import { asInt, asString, badRequest, ok, readJson, requireSession } from "@/lib/api";
 import { isValidIso, todayIso } from "@/lib/dates";
+import { linkWorkoutToPlan } from "@/lib/planning";
 
 export async function POST(request: Request) {
   const denied = await requireSession();
@@ -49,6 +50,8 @@ export async function POST(request: Request) {
     })
     .returning({ id: workouts.id })
     .get();
+
+  linkWorkoutToPlan(created.id, performedOn, type.id);
 
   const recoveryTypeIds = Array.isArray(body.recoveryTypeIds) ? body.recoveryTypeIds : [];
   for (const raw of recoveryTypeIds) {

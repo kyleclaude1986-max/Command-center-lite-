@@ -15,6 +15,14 @@ export function fmtDuration(seconds: number | null | undefined): string {
   return `${h} hr ${m} min`;
 }
 
+export function fmtRest(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export function fmtDurationShort(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return "—";
   return `${Math.round(seconds / 60)}m`;

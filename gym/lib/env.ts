@@ -15,6 +15,8 @@ const schema = z.object({
 
   HEALTH_INGEST_TOKEN: z.string().optional(),
 
+  ANTHROPIC_API_KEY: z.string().optional(),
+
   ICLOUD_USERNAME: z.string().optional(),
   ICLOUD_APP_PASSWORD: z.string().optional(),
   ICLOUD_WORKOUT_CALENDAR_NAME: z.string().default("Workouts"),

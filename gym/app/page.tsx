@@ -7,7 +7,7 @@ import { WorkoutListItem } from "@/components/WorkoutListItem";
 import { SupplementSlots, type SlotGroupView } from "@/components/SupplementSlots";
 import { fmtIsoDay, fmtIsoRelative, todayIso } from "@/lib/dates";
 import { goalSummaries } from "@/lib/goals";
-import { pluralize } from "@/lib/format";
+import { fmtRest, pluralize } from "@/lib/format";
 import {
   getActiveRecoveryTypes,
   getRecoveryOn,
@@ -15,6 +15,8 @@ import {
   getWorkoutsOn,
 } from "@/lib/queries";
 import { slotGroupsFor, supplementDay, supplementStreak } from "@/lib/supplements";
+import { GenerateButton } from "@/components/PlanActions";
+import { planDetail, plansInRange } from "@/lib/planning";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +43,9 @@ export default function HomePage() {
   }));
   const supplementsTaken = supplements.due.filter((s) => supplements.takenIds.has(s.id)).length;
   const supplementStreakDays = supplementStreak(today);
+  const todayPlan = plansInRange(today, today)[0] ?? null;
+  const todayPlanDetail =
+    todayPlan && todayPlan.exerciseCountGenerated > 0 ? planDetail(todayPlan.plan.id) : null;
 
   return (
     <>
@@ -58,6 +63,65 @@ export default function HomePage() {
         <Link href="/log" className="btn-primary w-full text-lg min-h-[64px]">
           Log workout
         </Link>
+
+        {todayPlan && todayPlan.plan.status !== "skipped" && (
+          <section className="card card-pad">
+            <header className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="section-title">Today&apos;s plan</h2>
+                <p className="mt-1 flex items-center gap-2 font-medium">
+                  <span
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: todayPlan.type.color }}
+                  />
+                  {todayPlan.subtype
+                    ? `${todayPlan.type.name} — ${todayPlan.subtype.name}`
+                    : todayPlan.type.name}
+                </p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  {todayPlan.plan.exerciseCount} exercises · {todayPlan.plan.targetRepsLow}-
+                  {todayPlan.plan.targetRepsHigh} reps · {fmtRest(todayPlan.plan.restSeconds)} rest
+                </p>
+              </div>
+              {todayPlan.type.supportsPlanning && todayPlan.plan.status !== "completed" && (
+                <GenerateButton
+                  planId={todayPlan.plan.id}
+                  hasExercises={todayPlan.exerciseCountGenerated > 0}
+                />
+              )}
+            </header>
+
+            {todayPlanDetail && todayPlanDetail.exercises.length > 0 ? (
+              <ol className="space-y-1.5">
+                {todayPlanDetail.exercises.map((entry, index) => {
+                  const working = entry.sets.filter((s) => !s.isWarmup);
+                  return (
+                    <li key={entry.planExerciseId} className="flex items-baseline gap-3 text-sm">
+                      <span className="w-4 shrink-0 tabular-nums text-ink-muted">{index + 1}</span>
+                      <span className="flex-1 font-medium">{entry.exercise.name}</span>
+                      <span className="shrink-0 tabular-nums text-ink-muted">
+                        {working.length} x {working[0]?.targetReps ?? "?"}
+                        {working[0]?.targetWeightLb ? ` @ ${working[0].targetWeightLb} lb` : ""}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <p className="text-sm text-ink-muted">
+                {todayPlan.plan.status === "completed"
+                  ? "Done."
+                  : todayPlan.type.supportsPlanning
+                    ? "Not built yet."
+                    : "Log it on the day."}
+              </p>
+            )}
+
+            <Link href="/plan" className="mt-3 inline-block text-sm text-ink-muted">
+              See the whole plan
+            </Link>
+          </section>
+        )}
 
         {summaries.map((summary) => (
           <GoalCard key={summary.goal.id} summary={summary} />
