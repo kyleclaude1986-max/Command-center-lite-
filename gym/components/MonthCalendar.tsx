@@ -7,7 +7,9 @@ export type CalendarDay = {
   future: boolean;
 };
 
-const LEGEND: { status: CalendarDay["status"]; label: string; className: string }[] = [
+export type LegendEntry = { status: CalendarDay["status"]; label: string; className: string };
+
+const DEFAULT_LEGEND: LegendEntry[] = [
   { status: "hit", label: "Took everything", className: "border-state-hit bg-state-hit" },
   { status: "missed", label: "Missed something", className: "border-state-miss bg-state-miss" },
   { status: "not_logged", label: "Not logged", className: "border-paper-line bg-state-idle" },
@@ -29,7 +31,15 @@ function cellClass(day: CalendarDay): string {
   }
 }
 
-export function MonthCalendar({ days, title }: { days: CalendarDay[]; title?: string }) {
+export function MonthCalendar({
+  days,
+  title,
+  legend = DEFAULT_LEGEND,
+}: {
+  days: CalendarDay[];
+  title?: string;
+  legend?: LegendEntry[];
+}) {
   if (days.length === 0) return null;
 
   const leadingBlanks = dayOfWeekIso(days[0].iso) - 1;
@@ -64,7 +74,7 @@ export function MonthCalendar({ days, title }: { days: CalendarDay[]; title?: st
       </div>
 
       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-        {LEGEND.map((entry) => (
+        {legend.map((entry) => (
           <li key={entry.status} className="flex items-center gap-1.5 text-xs text-ink-muted">
             <span className={clsx("inline-block h-2.5 w-2.5 rounded border", entry.className)} />
             {entry.label}

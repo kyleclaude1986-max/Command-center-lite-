@@ -25,6 +25,9 @@ const body = require("../lib/body") as typeof import("../lib/body");
 const health = require("../lib/health/parse") as typeof import("../lib/health/parse");
 const ingest = require("../lib/health/ingest") as typeof import("../lib/health/ingest");
 const energyLib = require("../lib/energy") as typeof import("../lib/energy");
+const sources = require("../lib/food/sources") as typeof import("../lib/food/sources");
+const diary = require("../lib/food/diary") as typeof import("../lib/food/diary");
+const macros = require("../lib/macros") as typeof import("../lib/macros");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
@@ -1079,6 +1082,264 @@ check(
   energyLib.energyOn("2026-08-09").activeKcal,
   500
 );
+
+section("Food database normalisation");
+const OFF_PRODUCT = {
+  code: "0038000138416",
+  product_name: "Greek Yogurt, Plain",
+  brands: "Test Dairy",
+  serving_size: "170 g",
+  serving_quantity: 170,
+  nutriments: {
+    "energy-kcal_100g": 59,
+    proteins_100g: 10.3,
+    carbohydrates_100g: 3.6,
+    fat_100g: 0.4,
+    fiber_100g: 0,
+  },
+};
+
+const offCandidate = sources.offProductToCandidate(OFF_PRODUCT)!;
+check("an Open Food Facts product normalises", offCandidate.name, "Greek Yogurt, Plain");
+check("macros stay per 100 g", offCandidate.proteinPer100g, 10.3);
+check("the serving size comes through in grams", offCandidate.servingGrams, 170);
+
+check(
+  "energy in kilojoules is converted to calories",
+  sources.offProductToCandidate({
+    ...OFF_PRODUCT,
+    nutriments: { ...OFF_PRODUCT.nutriments, "energy-kcal_100g": undefined, energy_100g: 247 },
+  })?.caloriesPer100g,
+  59
+);
+check(
+  "a product missing its macros is rejected rather than logged as zero",
+  sources.offProductToCandidate({ ...OFF_PRODUCT, nutriments: { proteins_100g: 10 } }),
+  null
+);
+check(
+  "a product with no serving size falls back to 100 g",
+  sources.offProductToCandidate({ ...OFF_PRODUCT, serving_quantity: undefined })?.servingGrams,
+  100
+);
+check("garbage is rejected", sources.offProductToCandidate("nope"), null);
+
+const usdaCandidate = sources.usdaFoodToCandidate({
+  fdcId: 173410,
+  description: "Chicken breast, roasted",
+  servingSize: 140,
+  servingSizeUnit: "g",
+  foodNutrients: [
+    { nutrientId: 1008, value: 165 },
+    { nutrientId: 1003, value: 31 },
+    { nutrientId: 1005, value: 0 },
+    { nutrientId: 1004, value: 3.6 },
+  ],
+})!;
+check("a USDA food normalises", usdaCandidate.caloriesPer100g, 165);
+check("its id becomes the source id", usdaCandidate.sourceId, "173410");
+check(
+  "a USDA food missing calories is rejected",
+  sources.usdaFoodToCandidate({ fdcId: 1, description: "Mystery", foodNutrients: [] }),
+  null
+);
+
+section("Logging food");
+const yogurt = diary.cacheFood(offCandidate);
+const chicken = diary.cacheFood(usdaCandidate);
+check("caching a food returns a row", yogurt.name, "Greek Yogurt, Plain");
+check(
+  "caching the same food twice does not duplicate it",
+  diary.cacheFood(offCandidate).id,
+  yogurt.id
+);
+
+check(
+  "one serving is scaled from per-100 g",
+  diary.macrosFor(yogurt, 1, 170).proteinG,
+  17.5
+);
+check("two servings double it", diary.macrosFor(yogurt, 2, 170).proteinG, 35);
+check("a half serving halves it", diary.macrosFor(yogurt, 0.5, 170).calories, 50.2);
+
+const FOOD_DAY = "2026-07-06";
+diary.logFood({ loggedOn: FOOD_DAY, meal: "breakfast", foodId: yogurt.id, quantity: 2 });
+diary.logFood({ loggedOn: FOOD_DAY, meal: "lunch", foodId: chicken.id, quantity: 1.5 });
+
+const totals = diary.totalsOn(FOOD_DAY);
+check("the day totals protein across meals", totals.proteinG, 35 + 65.1);
+check("the day totals calories across meals", totals.calories, 200.6 + 346.5);
+check("a day with entries reads as logged", diary.hasFoodOn(FOOD_DAY), true);
+check("a day with none does not", diary.hasFoodOn("2026-07-07"), false);
+
+const grouped = diary.diaryFor(FOOD_DAY);
+check("entries land in their meal", grouped.groups[0]?.entries.length, 1);
+check("every meal gets a group even when empty", grouped.groups.length, 4);
+
+section("Macros are snapshotted at log time");
+db.update(schema.foods).set({ proteinPer100g: 99 }).where(eq(schema.foods.id, yogurt.id)).run();
+check(
+  "reformulating a food does not rewrite what was already eaten",
+  diary.totalsOn(FOOD_DAY).proteinG,
+  35 + 65.1
+);
+db.update(schema.foods)
+  .set({ proteinPer100g: offCandidate.proteinPer100g })
+  .where(eq(schema.foods.id, yogurt.id))
+  .run();
+
+section("Editing and removing diary entries");
+const firstEntry = diary.entriesOn(FOOD_DAY)[0]!.entry;
+check("changing the quantity recalculates macros", (() => {
+  diary.updateEntry(firstEntry.id, { quantity: 1 });
+  return diary.entriesOn(FOOD_DAY)[0]?.entry.proteinG;
+})(), 17.5);
+diary.updateEntry(firstEntry.id, { quantity: 2 });
+
+diary.removeEntry(firstEntry.id);
+check("a removed entry leaves the diary", diary.entriesOn(FOOD_DAY).length, 1);
+check("its calories leave the total too", diary.totalsOn(FOOD_DAY).calories, 346.5);
+check(
+  "the row is soft deleted, not destroyed",
+  db.select().from(schema.foodLogEntries).where(eq(schema.foodLogEntries.id, firstEntry.id)).get() !==
+    undefined,
+  true
+);
+
+section("Saved meals");
+diary.logFood({ loggedOn: FOOD_DAY, meal: "breakfast", foodId: yogurt.id, quantity: 2 });
+const savedMeal = diary.saveMealFromDay("Yogurt and berries", FOOD_DAY, "breakfast");
+check("a meal can be captured from the diary", "id" in savedMeal, true);
+check(
+  "capturing a meal with nothing logged is refused",
+  "error" in diary.saveMealFromDay("Nothing", "2026-07-07", "dinner"),
+  true
+);
+check(
+  "logging a saved meal writes its items",
+  diary.logSavedMeal(("id" in savedMeal ? savedMeal.id : 0), "2026-07-08"),
+  1
+);
+check("the saved meal lands on the new day", diary.totalsOn("2026-07-08").proteinG, 35);
+
+section("Macro verdicts");
+const floor = (eaten: number, isToday = false) =>
+  macros.verdictFor(eaten, 180, "at_least", 10, isToday);
+const ceiling = (eaten: number, isToday = false) =>
+  macros.verdictFor(eaten, 2200, "at_most", 10, isToday);
+
+check("hitting a protein floor exactly is a hit", floor(180), "hit");
+check("landing inside the tolerance under a floor still counts", floor(165), "hit");
+check("falling well under a floor on a closed day is a miss", floor(120), "under");
+check("falling under a floor today is still pending", floor(120, true), "pending");
+check("clearing a floor easily is a hit", floor(210), "hit");
+
+check("staying under a ceiling is a hit", ceiling(1900), "hit");
+check("landing inside the tolerance over a ceiling still counts", ceiling(2350), "hit");
+check("blowing through a ceiling is over, even today", ceiling(3000, true), "over");
+check("an empty ceiling today is pending, not a win", ceiling(0, true), "pending");
+check("an empty ceiling on a closed day is a hit", ceiling(0), "hit");
+
+check("around is a hit in the middle", macros.verdictFor(200, 200, "around", 10, false), "hit");
+check("around is over above the band", macros.verdictFor(240, 200, "around", 10, false), "over");
+check("around is under below the band", macros.verdictFor(150, 200, "around", 10, false), "under");
+
+section("Macro targets by workout type");
+db.delete(workouts).run();
+const restDay = macros.macroDay(FOOD_DAY, "2026-08-12");
+check("a day with no workout uses the rest-day default", restDay.scopeName, "Rest day");
+
+db.insert(schema.macroTargets)
+  .values({
+    scopeKey: westO.id,
+    workoutTypeId: westO.id,
+    calories: 2800,
+    proteinG: 200,
+    carbsG: 300,
+    fatG: 80,
+  })
+  .run();
+db.insert(workouts)
+  .values({ performedOn: FOOD_DAY, workoutTypeId: westO.id })
+  .run();
+
+const liftDay = macros.macroDay(FOOD_DAY, "2026-08-12");
+check("logging a lift switches to that type's target", liftDay.scopeName, westO.name);
+check(
+  "the target itself changed",
+  liftDay.lines.find((l) => l.key === "calories")?.target,
+  2800
+);
+
+db.delete(workouts).run();
+db.insert(workouts)
+  .values({ performedOn: FOOD_DAY, workoutTypeId: typeId("walking") })
+  .run();
+check(
+  "a workout type with no target of its own falls back to the default",
+  macros.macroDay(FOOD_DAY, "2026-08-12").lines.find((l) => l.key === "calories")?.target,
+  restDay.lines.find((l) => l.key === "calories")?.target
+);
+
+section("Nutrition streak");
+db.delete(workouts).run();
+db.delete(schema.foodLogEntries).run();
+
+const perfect = db
+  .insert(schema.foods)
+  .values({
+    source: "custom",
+    sourceId: "verify-perfect",
+    name: "Exactly the target",
+    servingGrams: 100,
+    caloriesPer100g: 2100,
+    proteinPer100g: 185,
+    carbsPer100g: 190,
+    fatPer100g: 65,
+  })
+  .returning()
+  .get();
+
+const NUT_TODAY = "2026-08-12";
+function eatPerfectly(iso: string) {
+  diary.logFood({ loggedOn: iso, meal: "dinner", foodId: perfect.id, quantity: 1 });
+}
+
+check("nothing logged yesterday reads not logged", macros.nutritionStatus("2026-08-11", NUT_TODAY), "not_logged");
+eatPerfectly("2026-08-11");
+check("hitting everything reads hit", macros.nutritionStatus("2026-08-11", NUT_TODAY), "hit");
+check("a hit yesterday is a streak of one", macros.nutritionStreak(NUT_TODAY), 1);
+
+eatPerfectly("2026-08-10");
+check("two in a row is a streak of two", macros.nutritionStreak(NUT_TODAY), 2);
+
+check("today with nothing logged reads in progress", macros.nutritionStatus(NUT_TODAY, NUT_TODAY), "in_progress");
+check("an untracked today does not break the streak", macros.nutritionStreak(NUT_TODAY), 2);
+
+eatPerfectly(NUT_TODAY);
+check("eating well today extends the streak", macros.nutritionStreak(NUT_TODAY), 3);
+
+const overeat = db
+  .insert(schema.foods)
+  .values({
+    source: "custom",
+    sourceId: "verify-blowout",
+    name: "Far too much",
+    servingGrams: 100,
+    caloriesPer100g: 4000,
+    proteinPer100g: 10,
+    carbsPer100g: 400,
+    fatPer100g: 200,
+  })
+  .returning()
+  .get();
+diary.logFood({ loggedOn: NUT_TODAY, meal: "snack", foodId: overeat.id, quantity: 1 });
+check(
+  "blowing a ceiling today is a miss, not merely in progress",
+  macros.nutritionStatus(NUT_TODAY, NUT_TODAY),
+  "missed"
+);
+check("a missed today drops the streak to what came before", macros.nutritionStreak(NUT_TODAY), 0);
 
 section("Rest formatting");
 check("under a minute reads in seconds", format.fmtRest(45), "45s");
