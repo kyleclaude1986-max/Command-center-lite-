@@ -2,19 +2,37 @@
 
 > **For Claude (next session): start here.** This file captures everything
 > needed to pick up where we left off without re-asking the user.
-> Last updated: 2026-06-09.
+> Last updated: 2026-08-11.
 
 ---
 
+## This repo is Command Center only
+
+The business dashboard: calendars, Bloom to-dos, NetSuite sales. Branch
+`claude/command-center-dashboard-fNKIH`. Everything in this file is about that.
+
+**The gym tracker has moved out.** It lives in
+`kyleclaude1986-max/iron-log` as of 2026-08-11, ported with `git subtree split`
+so its history came with it. Anything gym-related belongs there, and that repo
+has its own `NOTES.md`. The `gym/` directory on branch
+`claude/personal-gym-tracker-nflrle` here is frozen history — do not work in it.
+
+**PR #1 is still worth merging.** Besides the gym app it carries the `.env`
+dollar-sign fix, which is the actual cause of the Command Center login failure
+described below.
+
 ## Session pickup checklist
 
-If you're starting a fresh session, here's the fastest path back in:
+1. `git status` and `git log -5 --oneline` to see which branch you are on.
+2. `npm install` at the root, or in `gym/`, if `node_modules` is missing.
+3. For the gym app, read `gym/NOTES.md` first.
+4. For Command Center, the open items are in **"Open items / next steps"**.
+5. Plan file for Command Center: `/root/.claude/plans/let-s-game-plan-i-linked-chipmunk.md`.
 
-1. Branch in use: `claude/command-center-dashboard-fNKIH`
-2. Initial scaffold + all four integrations + UI are **committed and pushed**.
-3. Kyle is in the middle of **standing up the Hostinger VPS** (he said "VPS" when I asked what to do next; he then pasted three secrets that had problems — see "What happened with the shared secrets" below).
-4. Open items to push forward are in **"Open items / next steps"** below.
-5. Plan file (lighter weight, the original game plan): `/root/.claude/plans/let-s-game-plan-i-linked-chipmunk.md`.
+**Command Center's own state:** initial scaffold, all four integrations, and
+the UI are committed and pushed. Kyle was mid-way through standing up the
+Hostinger VPS. PR #1 also carries the bcrypt/`.env` fix described below and is
+worth merging regardless of the gym app moving out.
 
 ---
 
@@ -183,7 +201,18 @@ Kyle pasted three secrets in chat that all needed adjustments:
 
 1. `NEXTAUTH_SECRET` — format OK (base64), but **now in chat history**.
 2. `ENCRYPTION_KEY` — was **hex (64 chars)**, but `lib/crypto.ts` decodes as base64 and requires 32 bytes after decode. Two paths: regenerate as `openssl rand -base64 32`, OR patch `lib/crypto.ts` to accept either format.
-3. `AUTH_PASSWORD_HASH` — **truncated to 53 chars**; a valid `$2b$12$…` bcrypt hash is exactly 60 chars. Re-run `npm run hash-password -- 'pw'` and copy the full output.
+3. `AUTH_PASSWORD_HASH` — arrived as **53 chars** instead of 60.
+
+   **Root cause found 2026-08-11 (this was not a copy-paste truncation).** A bare
+   `$` in a `.env` file is read as a variable reference, so `$2b`, `$12`, and the
+   third `$` get expanded to nothing — removing exactly 7 characters from a
+   60-character hash and leaving 53. Quoting the value does not help; the
+   expansion runs after parsing. Every dollar sign must be escaped as `\$`.
+
+   Fixed in both apps: `npm run hash-password` now prints a ready-to-paste
+   `AUTH_PASSWORD_HASH=` line with the escaping already applied, and the gym app
+   refuses to boot on a malformed hash rather than failing silently at the login
+   screen. `.env.example` and `deploy/README.md` document it in both apps.
 
 **I told him to regenerate all three** because anything pasted in chat is logged. I have not received confirmation that he did.
 
