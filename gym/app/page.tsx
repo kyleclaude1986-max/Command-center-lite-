@@ -5,6 +5,7 @@ import { QuickRecovery } from "@/components/QuickRecovery";
 import { RatingButtons } from "@/components/RatingButtons";
 import { WorkoutListItem } from "@/components/WorkoutListItem";
 import { SupplementSlots, type SlotGroupView } from "@/components/SupplementSlots";
+import { NetCalories } from "@/components/NetCalories";
 import { fmtIsoDay, fmtIsoRelative, todayIso } from "@/lib/dates";
 import { goalSummaries } from "@/lib/goals";
 import { fmtRest, pluralize } from "@/lib/format";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/queries";
 import { slotGroupsFor, supplementDay, supplementStreak } from "@/lib/supplements";
 import { GenerateButton } from "@/components/PlanActions";
+import { energyOn } from "@/lib/energy";
 import { planDetail, plansInRange } from "@/lib/planning";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +45,7 @@ export default function HomePage() {
   }));
   const supplementsTaken = supplements.due.filter((s) => supplements.takenIds.has(s.id)).length;
   const supplementStreakDays = supplementStreak(today);
+  const energy = energyOn(today);
   const todayPlan = plansInRange(today, today)[0] ?? null;
   const todayPlanDetail =
     todayPlan && todayPlan.exerciseCountGenerated > 0 ? planDetail(todayPlan.plan.id) : null;
@@ -126,6 +129,8 @@ export default function HomePage() {
         {summaries.map((summary) => (
           <GoalCard key={summary.goal.id} summary={summary} />
         ))}
+
+        {(energy.netKcal !== null || energy.hasFood) && <NetCalories energy={energy} />}
 
         <section className="card card-pad">
           <h2 className="section-title mb-3">Logged today</h2>

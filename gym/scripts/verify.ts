@@ -22,10 +22,14 @@ const supplementsLib = require("../lib/supplements") as typeof import("../lib/su
 const planning = require("../lib/planning") as typeof import("../lib/planning");
 const logbook = require("../lib/logbook") as typeof import("../lib/logbook");
 const body = require("../lib/body") as typeof import("../lib/body");
+const health = require("../lib/health/parse") as typeof import("../lib/health/parse");
+const ingest = require("../lib/health/ingest") as typeof import("../lib/health/ingest");
+const energyLib = require("../lib/energy") as typeof import("../lib/energy");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
 const {
+  dailyEnergy,
   exercises,
   exerciseSets,
   goals,
@@ -906,6 +910,174 @@ check(
     bodyFatPct: null,
   }),
   null
+);
+
+section("Apple Health parsing");
+const EXPORT = {
+  data: {
+    workouts: [
+      {
+        id: "wk-1",
+        name: "Traditional Strength Training",
+        start: "2026-08-10 18:04:11 -0500",
+        end: "2026-08-10 19:02:41 -0500",
+        activeEnergyBurned: { qty: 412.4, units: "kcal" },
+        heartRateData: { average: 128, max: 164 },
+      },
+      {
+        id: "wk-late",
+        name: "Walking",
+        start: "2026-08-10 20:30:00 -0500",
+        duration: 32,
+      },
+    ],
+    metrics: [
+      {
+        name: "active_energy",
+        units: "kcal",
+        data: [
+          { date: "2026-08-10 09:00:00 -0500", qty: 300 },
+          { date: "2026-08-10 18:00:00 -0500", qty: 412.4 },
+        ],
+      },
+      {
+        name: "basal_energy_burned",
+        units: "kcal",
+        data: [{ date: "2026-08-10 23:59:00 -0500", qty: 1810 }],
+      },
+      {
+        name: "weight_body_mass",
+        units: "lb",
+        data: [
+          { date: "2026-08-10 06:10:00 -0500", qty: 203.4 },
+          { date: "2026-08-10 21:10:00 -0500", qty: 205.1 },
+        ],
+      },
+      {
+        name: "body_fat_percentage",
+        units: "%",
+        data: [{ date: "2026-08-10 06:10:00 -0500", qty: 0.192 }],
+      },
+    ],
+  },
+};
+
+const parsed = health.parsePayload(EXPORT);
+check("both workouts parse", parsed.workouts.length, 2);
+check("a workout lands on its local day", parsed.workouts[0]?.performedOn, "2026-08-10");
+check("duration comes from start and end", parsed.workouts[0]?.durationSec, 58 * 60 + 30);
+check("a duration in minutes is converted to seconds", parsed.workouts[1]?.durationSec, 32 * 60);
+check("heart rate is picked up", parsed.workouts[0]?.maxHeartRate, 164);
+check(
+  "an evening workout stays on its own day rather than rolling into UTC tomorrow",
+  parsed.workouts[1]?.performedOn,
+  "2026-08-10"
+);
+
+check("energy is reported for one day", parsed.energy.length, 1);
+check("active energy samples are summed", parsed.energy[0]?.activeKcal, 712);
+check("resting energy comes through", parsed.energy[0]?.basalKcal, 1810);
+
+check("body measurements are reported for one day", parsed.body.length, 1);
+check("the last weight of the day wins", parsed.body[0]?.weightLb, 205.1);
+check("a fractional body fat is read as a percentage", parsed.body[0]?.bodyFatPct, 19.2);
+check("fat mass is worked out from weight and percentage", parsed.body[0]?.fatMassLb, 39.4);
+
+check("an empty payload parses to nothing", health.parsePayload({}).workouts.length, 0);
+check("garbage parses to nothing", health.parsePayload("nope").workouts.length, 0);
+check(
+  "a workout with no usable timestamp is skipped",
+  health.parsePayload({ data: { workouts: [{ name: "Mystery" }] } }).workouts.length,
+  0
+);
+
+section("Applying an Apple Health export");
+db.delete(workouts).run();
+const firstApply = ingest.applyPayload(parsed);
+check("both workouts are written", firstApply.workoutsWritten, 2);
+check("energy is written", firstApply.energyWritten, 1);
+check("body measurements are written", firstApply.bodyWritten, 1);
+
+const secondApply = ingest.applyPayload(parsed);
+check("re-sending the same export writes no new workouts", secondApply.workoutsWritten, 0);
+check(
+  "re-sending does not duplicate the day's energy",
+  db.select().from(dailyEnergy).all().length,
+  1
+);
+check(
+  "re-sending does not inflate the burn",
+  db.select().from(dailyEnergy).get()?.activeKcal,
+  712
+);
+
+section("Attaching a Watch duration to a hand-logged workout");
+db.delete(workouts).run();
+const handLogged = db
+  .insert(workouts)
+  .values({ performedOn: "2026-08-10", workoutTypeId: typeId("walking") })
+  .returning({ id: workouts.id })
+  .get();
+
+const attached = ingest.applyPayload(parsed);
+check("one Watch workout attaches instead of duplicating", attached.workoutsMatched, 1);
+check("the other is still imported on its own", attached.workoutsWritten, 1);
+check(
+  "the hand-logged workout picked up a duration",
+  db.select().from(workouts).where(eq(workouts.id, handLogged.id)).get()?.durationSec,
+  58 * 60 + 30
+);
+check(
+  "the duration is credited to the Watch",
+  db.select().from(workouts).where(eq(workouts.id, handLogged.id)).get()?.durationSource,
+  "apple_health"
+);
+check(
+  "a walk with no typed minutes now clears the cardio minimum",
+  goalsLib.goalSummary(goalBySlug("cardio"), "2026-08-12").qualifiedCount,
+  1
+);
+
+db.delete(workouts).run();
+const typedByHand = db
+  .insert(workouts)
+  .values({ performedOn: "2026-08-10", workoutTypeId: typeId("walking"), durationSec: 1500 })
+  .returning({ id: workouts.id })
+  .get();
+ingest.applyPayload(parsed);
+check(
+  "a duration Kyle typed himself is left alone",
+  db.select().from(workouts).where(eq(workouts.id, typedByHand.id)).get()?.durationSec,
+  1500
+);
+
+section("Net calories");
+const day = energyLib.energyOn("2026-08-10");
+check("burn is active plus resting", day.burnedKcal, 712 + 1810);
+check("nothing eaten yet reads as zero", day.eatenKcal, 0);
+check("net is eaten minus the burn", day.netKcal, -(712 + 1810));
+
+energyLib.recordEnergy("2026-08-09", { activeKcal: 500 });
+check(
+  "a day with active energy but no resting reads unavailable",
+  energyLib.energyOn("2026-08-09").netKcal,
+  null
+);
+check(
+  "a day with no energy at all reads unavailable",
+  energyLib.energyOn("2026-08-08").netKcal,
+  null
+);
+energyLib.recordEnergy("2026-08-09", { basalKcal: 1800 });
+check(
+  "filling in the missing half makes net available",
+  energyLib.energyOn("2026-08-09").netKcal,
+  -2300
+);
+check(
+  "recording one half does not wipe the other",
+  energyLib.energyOn("2026-08-09").activeKcal,
+  500
 );
 
 section("Rest formatting");
