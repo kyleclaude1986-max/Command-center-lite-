@@ -1,0 +1,45 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# next.js
+.next
+out
+next-env.d.ts
+
+# production
+build
+dist
+
+# secrets — .env.example is the only env file that belongs in git
+.env
+.env.local
+.env.production
+.env.*.local
+
+# your data: the database, the encrypted photos, and anything backed up beside them.
+# This directory holds the whole app's contents and the photos are only as private
+# as the key that encrypts them, so none of it goes near a commit.
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.enc
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor
+.vscode
+.idea
+.DS_Store
+
+# typescript
+*.tsbuildinfo
