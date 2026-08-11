@@ -2,19 +2,36 @@
 
 > **For Claude (next session): start here.** This file captures everything
 > needed to pick up where we left off without re-asking the user.
-> Last updated: 2026-06-09.
+> Last updated: 2026-08-11.
 
 ---
 
+## There are two apps in this repo
+
+**Command Center** (repo root) — the business dashboard. Calendars, Bloom
+to-dos, NetSuite sales. Branch `claude/command-center-dashboard-fNKIH`.
+Everything below about NetSuite, Bloom, and Microsoft Graph is about this one.
+
+**Gym tracker** (`gym/`) — Kyle's personal training log. Branch
+`claude/personal-gym-tracker-nflrle`, draft PR #1. **It has its own memory file
+at `gym/NOTES.md` — read that, not this, for anything gym-related.** It is
+complete and verified apart from one blocked step: it is meant to move to its
+own repo called `iron-log`, and repository creation is refused with
+`403 Resource not accessible by integration`. Kyle needs to create an empty
+private `iron-log` repo before the port can happen.
+
 ## Session pickup checklist
 
-If you're starting a fresh session, here's the fastest path back in:
+1. `git status` and `git log -5 --oneline` to see which branch you are on.
+2. `npm install` at the root, or in `gym/`, if `node_modules` is missing.
+3. For the gym app, read `gym/NOTES.md` first.
+4. For Command Center, the open items are in **"Open items / next steps"**.
+5. Plan file for Command Center: `/root/.claude/plans/let-s-game-plan-i-linked-chipmunk.md`.
 
-1. Branch in use: `claude/command-center-dashboard-fNKIH`
-2. Initial scaffold + all four integrations + UI are **committed and pushed**.
-3. Kyle is in the middle of **standing up the Hostinger VPS** (he said "VPS" when I asked what to do next; he then pasted three secrets that had problems — see "What happened with the shared secrets" below).
-4. Open items to push forward are in **"Open items / next steps"** below.
-5. Plan file (lighter weight, the original game plan): `/root/.claude/plans/let-s-game-plan-i-linked-chipmunk.md`.
+**Command Center's own state:** initial scaffold, all four integrations, and
+the UI are committed and pushed. Kyle was mid-way through standing up the
+Hostinger VPS. PR #1 also carries the bcrypt/`.env` fix described below and is
+worth merging regardless of the gym app moving out.
 
 ---
 
