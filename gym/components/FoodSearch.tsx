@@ -69,10 +69,7 @@ export function FoodSearch({ initialMeal, loggedOn }: { initialMeal: Meal; logge
     }
   }, []);
 
-  useEffect(() => {
-    void load("");
-  }, [load]);
-
+  // This also covers the first render, where query is empty and recents load.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed === "") {
@@ -290,6 +287,15 @@ function BarcodeScanner({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  /**
+   * The handlers are held in refs and the effect runs once. Depending on them
+   * directly would tear the camera down and start it again on every parent render —
+   * so typing in the search box while the scanner is open would restart the camera
+   * on each keystroke.
+   */
+  const handlers = useRef({ onCode, onError });
+  handlers.current = { onCode, onError };
+
   useEffect(() => {
     let stop: (() => void) | null = null;
     let cancelled = false;
@@ -304,14 +310,16 @@ function BarcodeScanner({
         const controls = await reader.decodeFromVideoDevice(undefined, video, (result) => {
           if (result && !cancelled) {
             cancelled = true;
-            onCode(result.getText());
+            handlers.current.onCode(result.getText());
           }
         });
 
         stop = () => controls.stop();
         if (cancelled) controls.stop();
       } catch {
-        if (!cancelled) onError("Could not open the camera. Search by name instead.");
+        if (!cancelled) {
+          handlers.current.onError("Could not open the camera. Search by name instead.");
+        }
       }
     })();
 
@@ -319,7 +327,7 @@ function BarcodeScanner({
       cancelled = true;
       stop?.();
     };
-  }, [onCode, onError]);
+  }, []);
 
   return (
     <div className="card overflow-hidden">

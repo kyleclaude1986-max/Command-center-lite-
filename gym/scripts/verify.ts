@@ -459,6 +459,66 @@ check(
   3
 );
 
+section("Taking a day off the week");
+const beforeFriday = db.select().from(workoutPlans).all().length;
+templateDay(5, chestDay.id);
+check("adding Friday fills four more weeks", planning.materializePlans(WEEK, 4).created, 4);
+
+const fridays = db
+  .select()
+  .from(workoutPlans)
+  .where(eq(workoutPlans.workoutSubtypeId, chestDay.id))
+  .all();
+check("four Friday plans exist", fridays.length, 4);
+
+db.update(workoutPlans)
+  .set({ isOverride: true, exerciseCount: 7 })
+  .where(eq(workoutPlans.id, fridays[1]!.id))
+  .run();
+db.update(workoutPlans)
+  .set({ status: "completed" })
+  .where(eq(workoutPlans.id, fridays[2]!.id))
+  .run();
+db.update(workoutPlans)
+  .set({ status: "skipped" })
+  .where(eq(workoutPlans.id, fridays[3]!.id))
+  .run();
+
+db.delete(planTemplateDays).where(eq(planTemplateDays.dayOfWeek, 5)).run();
+check(
+  "dropping Friday from the week clears only the untouched plans",
+  planning.materializePlans(WEEK, 4).removed,
+  1
+);
+check(
+  "the untouched Friday is gone",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, fridays[0]!.id)).get(),
+  undefined
+);
+check(
+  "an edited Friday is left alone",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, fridays[1]!.id)).get() !== undefined,
+  true
+);
+check(
+  "a completed Friday is never removed",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, fridays[2]!.id)).get() !== undefined,
+  true
+);
+check(
+  "a deliberately skipped Friday is never removed",
+  db.select().from(workoutPlans).where(eq(workoutPlans.id, fridays[3]!.id)).get() !== undefined,
+  true
+);
+check("re-running removes nothing more", planning.materializePlans(WEEK, 4).removed, 0);
+
+db.delete(workoutPlans).where(eq(workoutPlans.workoutSubtypeId, chestDay.id)).run();
+check(
+  "Monday and Wednesday are untouched throughout",
+  db.select().from(workoutPlans).all().length,
+  beforeFriday
+);
+
 section("Deterministic fallback generator");
 db.delete(planExercises).run();
 const planForFallback = db

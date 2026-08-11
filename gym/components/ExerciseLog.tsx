@@ -297,11 +297,23 @@ function SetField({
   step: number;
   onCommit: (value: number | null) => void;
 }) {
-  const [draft, setDraft] = useState(value === null ? "" : String(value));
-  const [dirty, setDirty] = useState(false);
-
   const committed = value === null ? "" : String(value);
-  if (!dirty && draft !== committed) setDraft(committed);
+
+  const [draft, setDraft] = useState(committed);
+  const [dirty, setDirty] = useState(false);
+  const [lastSeen, setLastSeen] = useState(committed);
+
+  /**
+   * Resync only when the saved value actually changes, not whenever the draft
+   * differs from it. Syncing on difference alone means that between blurring the
+   * field and the save landing, the typed number is briefly replaced by the old
+   * one — you enter 225, tab away, watch it flick back to 185, then to 225.
+   */
+  if (committed !== lastSeen) {
+    setLastSeen(committed);
+    setDraft(committed);
+    setDirty(false);
+  }
 
   return (
     <input

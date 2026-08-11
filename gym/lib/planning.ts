@@ -135,14 +135,20 @@ export function libraryFor(groups: MuscleGroup[]): Exercise[] {
 /**
  * Creates plan rows for every templated day in the horizon that doesn't have one.
  * Existing plans are left alone unless they are still `scheduled` and unedited, in
- * which case their parameters are refreshed from the template.
+ * which case their parameters are refreshed from the template — or the day has been
+ * taken off the week entirely, in which case they are removed.
+ *
+ * That last part matters: without it, dropping Wednesday from the template leaves
+ * eight weeks of Wednesday sessions sitting on the calendar with nothing behind them.
+ * Only untouched plans are removed. An overridden day, a completed one, a skipped
+ * one, or one with a workout already attached is left exactly where it is.
  */
 export function materializePlans(
   fromIso: IsoDate = todayIso(),
   weeks = DEFAULT_HORIZON_WEEKS
-): { created: number; updated: number } {
+): { created: number; updated: number; removed: number } {
   const active = activeTemplate();
-  if (!active) return { created: 0, updated: 0 };
+  if (!active) return { created: 0, updated: 0, removed: 0 };
 
   const byDayOfWeek = new Map(active.days.map((day) => [day.dayOfWeek, day]));
   // isoRange is inclusive at both ends, so N weeks is N*7 days counting fromIso itself.
@@ -157,12 +163,24 @@ export function materializePlans(
 
   let created = 0;
   let updated = 0;
+  let removed = 0;
 
   for (const iso of isoRange(fromIso, toIso)) {
     const templateDay = byDayOfWeek.get(dayOfWeekIso(iso));
-    if (!templateDay || templateDay.workoutTypeId === null) continue;
-
     const current = byDate.get(iso);
+
+    if (!templateDay || templateDay.workoutTypeId === null) {
+      if (
+        current &&
+        current.status === "scheduled" &&
+        !current.isOverride &&
+        current.workoutId === null
+      ) {
+        db.delete(workoutPlans).where(eq(workoutPlans.id, current.id)).run();
+        removed += 1;
+      }
+      continue;
+    }
 
     if (!current) {
       db.insert(workoutPlans)
@@ -212,7 +230,7 @@ export function materializePlans(
     updated += 1;
   }
 
-  return { created, updated };
+  return { created, updated, removed };
 }
 
 export function plansInRange(fromIso: IsoDate, toIso: IsoDate): PlanRow[] {

@@ -1,6 +1,6 @@
 import ICAL from "ical.js";
 import { formatInTimeZone } from "date-fns-tz";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   exercises,
@@ -157,7 +157,12 @@ export async function pushWorkouts(today: IsoDate = todayIso()): Promise<PushRes
       db.update(workouts)
         .set({
           calendarUid: uidFor(workout.id),
-          calendarHref: workout.calendarHref ?? `${calendar.url}${filename}`,
+          /**
+           * Resolved the same way tsdav resolves it when creating the object, rather
+           * than concatenated. A calendar URL without a trailing slash would
+           * otherwise produce a href that no later update or delete can find.
+           */
+          calendarHref: workout.calendarHref ?? new URL(filename, calendar.url).href,
           calendarEtag: response.headers?.get?.("etag") ?? null,
           calendarSyncState: "synced",
           calendarSyncError: null,
@@ -474,14 +479,16 @@ export function dismissScheduled(scheduledId: number): void {
 }
 
 export function pendingPushCount(): number {
-  return db
-    .select({ id: workouts.id })
-    .from(workouts)
-    .where(
-      and(
-        isNull(workouts.deletedAt),
-        or(eq(workouts.calendarSyncState, "pending"), eq(workouts.calendarSyncState, "failed"))
+  return (
+    db
+      .select({ total: count() })
+      .from(workouts)
+      .where(
+        and(
+          isNull(workouts.deletedAt),
+          or(eq(workouts.calendarSyncState, "pending"), eq(workouts.calendarSyncState, "failed"))
+        )
       )
-    )
-    .all().length;
+      .get()?.total ?? 0
+  );
 }

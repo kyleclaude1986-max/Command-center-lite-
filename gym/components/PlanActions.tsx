@@ -68,11 +68,12 @@ export function MaterializeButton() {
       const res = await fetch("/api/plans/materialize", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        setNote(
-          body.created === 0 && body.updated === 0
-            ? "Already up to date"
-            : `${body.created} added, ${body.updated} updated`
-        );
+        const parts = [
+          body.created > 0 && `${body.created} added`,
+          body.updated > 0 && `${body.updated} updated`,
+          body.removed > 0 && `${body.removed} removed`,
+        ].filter(Boolean);
+        setNote(parts.length === 0 ? "Already up to date" : parts.join(", "));
       }
       startTransition(() => router.refresh());
     } finally {

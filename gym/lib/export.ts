@@ -1,4 +1,5 @@
-import { asc, desc, eq, isNull } from "drizzle-orm";
+import { asc, count, desc, eq, isNull } from "drizzle-orm";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { db } from "./db/client";
 import {
   bodyMetrics,
@@ -202,14 +203,23 @@ export function csvFor(table: CsvTable): string {
 
 export type TableCount = { label: string; count: number };
 
+/**
+ * Counted in SQL rather than by materialising every row and taking its length.
+ * After a couple of years of food logging that difference is tens of thousands of
+ * objects built and thrown away every time the page loads.
+ */
+function rowsIn(table: SQLiteTable): number {
+  return db.select({ total: count() }).from(table).get()?.total ?? 0;
+}
+
 export function recordCounts(): TableCount[] {
   return [
-    { label: "Workouts", count: db.select().from(workouts).all().length },
-    { label: "Logged sets", count: db.select().from(exerciseSets).all().length },
-    { label: "Body readings", count: db.select().from(bodyMetrics).all().length },
-    { label: "Food entries", count: db.select().from(foodLogEntries).all().length },
-    { label: "Supplement doses", count: db.select().from(supplementLog).all().length },
-    { label: "Photos", count: db.select().from(progressPhotos).all().length },
-    { label: "Cached foods", count: db.select().from(foods).all().length },
+    { label: "Workouts", count: rowsIn(workouts) },
+    { label: "Logged sets", count: rowsIn(exerciseSets) },
+    { label: "Body readings", count: rowsIn(bodyMetrics) },
+    { label: "Food entries", count: rowsIn(foodLogEntries) },
+    { label: "Supplement doses", count: rowsIn(supplementLog) },
+    { label: "Photos", count: rowsIn(progressPhotos) },
+    { label: "Cached foods", count: rowsIn(foods) },
   ];
 }
