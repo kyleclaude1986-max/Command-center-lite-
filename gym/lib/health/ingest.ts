@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { dailyEnergy, healthIngests, workouts, workoutTypes } from "../db/schema";
-import { recordMetrics } from "../body";
+import { recordMetrics, type MetricInput } from "../body";
 import { APPLE_HEALTH_TYPE_SLUG } from "../seed-data";
 import { parsePayload, type ParsedPayload, type ParsedWorkout } from "./parse";
 
@@ -136,14 +136,18 @@ export function applyPayload(parsed: ParsedPayload): Omit<IngestResult, "ingestI
     energyWritten += 1;
   }
 
+  /**
+   * Only fields the phone actually reported are written. A null here means Health
+   * did not send that metric, which is not the same as Kyle saying it is unknown —
+   * passing it through would wipe a muscle mass he typed in by hand.
+   */
   for (const measurement of parsed.body) {
-    const values = {
-      weightLb: measurement.weightLb,
-      bodyFatPct: measurement.bodyFatPct,
-      muscleMassLb: measurement.muscleMassLb,
-      fatMassLb: measurement.fatMassLb,
-    };
-    if (Object.values(values).every((value) => value === null)) continue;
+    const values: MetricInput = {};
+    if (measurement.weightLb !== null) values.weightLb = measurement.weightLb;
+    if (measurement.bodyFatPct !== null) values.bodyFatPct = measurement.bodyFatPct;
+    if (measurement.muscleMassLb !== null) values.muscleMassLb = measurement.muscleMassLb;
+    if (measurement.fatMassLb !== null) values.fatMassLb = measurement.fatMassLb;
+    if (Object.keys(values).length === 0) continue;
 
     recordMetrics(measurement.measuredOn, values, "apple_health");
     bodyWritten += 1;

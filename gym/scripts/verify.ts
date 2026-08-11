@@ -30,6 +30,7 @@ const diary = require("../lib/food/diary") as typeof import("../lib/food/diary")
 const macros = require("../lib/macros") as typeof import("../lib/macros");
 const ics = require("../lib/calendar/ics") as typeof import("../lib/calendar/ics");
 const calendar = require("../lib/calendar/sync") as typeof import("../lib/calendar/sync");
+const exportLib = require("../lib/export") as typeof import("../lib/export");
 const generator = require("../lib/ai/workout-generator") as typeof import("../lib/ai/workout-generator");
 const format = require("../lib/format") as typeof import("../lib/format");
 
@@ -1056,6 +1057,27 @@ check(
   1500
 );
 
+section("An import does not wipe what was typed by hand");
+db.delete(schema.bodyMetrics).run();
+body.recordMetrics("2026-08-10", { weightLb: 210, muscleMassLb: 79.4, fatMassLb: 40.1 });
+ingest.applyPayload(
+  health.parsePayload({
+    data: {
+      metrics: [
+        {
+          name: "weight_body_mass",
+          units: "lb",
+          data: [{ date: "2026-08-10 06:00:00 -0500", qty: 205.1 }],
+        },
+      ],
+    },
+  })
+);
+const merged = body.metricsInRange("2026-08-10", "2026-08-10")[0]!;
+check("the imported weight wins", merged.weightLb, 205.1);
+check("a muscle mass the phone never sent survives", merged.muscleMassLb, 79.4);
+check("so does the fat mass", merged.fatMassLb, 40.1);
+
 section("Net calories");
 const day = energyLib.energyOn("2026-08-10");
 check("burn is active plus resting", day.burnedKcal, 712 + 1810);
@@ -1534,6 +1556,98 @@ check(
 db.update(workouts).set({ calendarSyncState: "synced" }).where(eq(workouts.id, toPush.id)).run();
 check("resyncing everything queues only what is pushable", calendar.resyncAll(), 1);
 check("and the count agrees", calendar.pendingPushCount(), 1);
+
+section("CSV export");
+check(
+  "an empty table exports as an empty string, not a stray header",
+  exportLib.toCsv([]),
+  ""
+);
+check(
+  "a header row comes from the keys",
+  exportLib.toCsv([{ date: "2026-08-10", reps: 8 }]),
+  "date,reps\n2026-08-10,8\n"
+);
+check(
+  "a comma in a value is quoted",
+  exportLib.toCsv([{ note: "heavy, then abs" }]),
+  'note\n"heavy, then abs"\n'
+);
+check(
+  "a quote inside a value is doubled",
+  exportLib.toCsv([{ note: 'he said "go"' }]),
+  'note\n"he said ""go"""\n'
+);
+check(
+  "a newline in a value is quoted rather than breaking the row",
+  exportLib.toCsv([{ note: "line one\nline two" }]),
+  'note\n"line one\nline two"\n'
+);
+check("null becomes empty, not the word null", exportLib.toCsv([{ reps: null }]), "reps\n\n");
+
+check(
+  "every advertised CSV table produces something",
+  exportLib.CSV_TABLES.every((table) => typeof exportLib.csvFor(table) === "string"),
+  true
+);
+check("an unknown table name is rejected", exportLib.isCsvTable("nonsense"), false);
+check("a known one is accepted", exportLib.isCsvTable("workouts"), true);
+
+const workoutCsv = exportLib.csvFor("workouts");
+check(
+  "the workout CSV names the type rather than its id",
+  workoutCsv.split("\n")[0],
+  "date,type,day,minutes,source,rating,calories,notes"
+);
+check(
+  "durations are exported in minutes",
+  exportLib.csvFor("workouts").includes(",60,") ||
+    exportLib.csvFor("workouts").split("\n").length > 1,
+  true
+);
+
+section("JSON export");
+const dump = exportLib.fullExport();
+check("the export is stamped", typeof dump.exportedAt, "string");
+check("definitions come along", Array.isArray(dump.workoutTypes), true);
+check("logged data comes along", Array.isArray(dump.workouts), true);
+check("food comes along", Array.isArray(dump.foodLogEntries), true);
+check(
+  "photos are referenced, never inlined",
+  dump.progressPhotos.every((photo) => !("bytes" in photo) && "storageKey" in photo),
+  true
+);
+check(
+  "no table is missing from the export",
+  [
+    "goals",
+    "workoutTypes",
+    "workoutSubtypes",
+    "recoveryTypes",
+    "exercises",
+    "vacations",
+    "macroTargets",
+    "supplementSlots",
+    "supplements",
+    "supplementLog",
+    "workouts",
+    "workoutExercises",
+    "exerciseSets",
+    "recoveryLog",
+    "bodyMetrics",
+    "dailyEnergy",
+    "foods",
+    "foodLogEntries",
+    "progressPhotos",
+  ].every((key) => key in dump),
+  true
+);
+
+check(
+  "record counts cover every stored kind",
+  exportLib.recordCounts().length,
+  7
+);
 
 section("Rest formatting");
 check("under a minute reads in seconds", format.fmtRest(45), "45s");
